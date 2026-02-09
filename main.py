@@ -1,5 +1,5 @@
 from google.cloud import bigquery
-import pandas
+import pandas as pd
 
 client = bigquery.Client()
 
@@ -17,9 +17,21 @@ filtered_df = df[df['F100'] & df['newsroom_url'].notna()]['newsroom_url'] # Filt
 
 
 
-for row in rows:
-    print(row.corporation)
+# Launch search with Bright Data API
+from brightdata import BrightDataClient
+import os
 
+client = BrightDataClient()
+
+# Google search
+async with BrightDataClient() as client: 
+    results = await client.search.google(query="site:https://corporate.charter.com/newsroom before:2026-02-09 after:2026-02-01", num_results=10)
+
+    # 1. Convert the list of dictionaries directly to a DataFrame
+    df = pd.DataFrame(results.data)
+
+    # 2. Optional: Clean up or inspect the data
+    print(df.head())
 
 # def main():
 #     print("Hello from press-release-collection!")
