@@ -1,0 +1,17 @@
+company,query,industry
+Abbott,"(""Abbott Laboratories"" OR ""Abbott Labs"")",MedTech
+AbbVie,"(""AbbVie"")",Innovative Medicine
+AstraZeneca,"(""AstraZeneca"")",Innovative Medicine
+Bristol Myers Squibb,"(""Bristol-Myers Squibb"" OR ""Bristol Myers Squibb"")",Innovative Medicine
+Boston Scientific,Boston Scientific,MedTech
+GSK,"(""GSK"" OR ""GlaxoSmithKline"" OR ""GSK plc"")",Innovative Medicine
+Johnson & Johnson,"(""JNJ"" OR ""J&J"" OR ""Johnson & Johnson"" OR ""Johnson and Johnson"")",Innovative Medicine
+Medtronic,"(""Medtronic"" OR ""Medtronic plc"")",MedTech
+Merck,"(""Merck"" OR ""Merck & Co"")",Innovative Medicine
+Stryker,"(""Stryker"")",MedTech
+Pfizer,"(""Pfizer"")",Innovative Medicine
+Eli Lilly,"(""Eli Lilly"" OR ""Lilly"")",Innovative Medicine
+Novo Nordisk,"(""Novo Nordisk"")",Innovative Medicine
+Intuitive Surgical,"(""Intuitive Surgical"")",MedTech
+Regeneron,"(""Regeneron"")",Innovative Medicine
+Kenvue,Kenvue,Kenvue
