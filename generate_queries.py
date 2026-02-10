@@ -1,6 +1,9 @@
 import pandas as pd
 from urllib.parse import quote  # URL encoding for query parameters
 
+
+# TODO Update the query generation to pull from my pressroom urls
+
 # Function to generate list of queries from two inputs (outlet urls and company name queries)
 # def create_search_queries(query_terms, outlet_domains, start_date, end_date):
 def create_search_queries(start_date, end_date):
@@ -37,4 +40,4 @@ def create_search_queries(start_date, end_date):
             query = f'https://www.google.com/search?q={encoded_term}+site:{domain}+before:{end_date}+after:{start_date}&gl=US&hl=en&brd_json=1'
             queries.append(query)
     
-    return queries
+    return queries[5]
