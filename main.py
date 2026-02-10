@@ -1,19 +1,5 @@
-from google.cloud import bigquery
-import pandas as pd
-
-client = bigquery.Client()
-
-# Perform a query.
-QUERY = (
-    'SELECT * FROM `sri-benchmarking-databases.social_media_activity_archive.benchmarking_corporate_reference` '
-        )
-
-query_job = client.query(QUERY)  # API request
-rows = query_job.result()  # Waits for query to finish
-
-df = rows.to_dataframe() # Convert query results to pandas dataframe
-
-filtered_df = df[df['F100'] & df['newsroom_url'].notna()]['newsroom_url'] # Filter dataframe & select newsroom base url column
+from grab_reference_data import grab_reference_data
+df = grab_reference_data()
 
 
 
