@@ -25,19 +25,28 @@ def create_search_queries(start_date, end_date):
     # TODO: Add interactive selection for different company sets
 
     # Load query terms (company names/brands to search for)
-    query_terms = pd.read_csv('inputs/company_information.csv')['query'].tolist()
+    # query_terms = pd.read_csv('inputs/company_information.csv')['query'].tolist()
 
     # Load media outlet domains to search within
-    outlet_domains = pd.read_csv('inputs/outlet_w_domain.csv')['domain'].tolist()
+    pressroom_urls = pd.read_csv('inputs/reference_data.csv')['newsroom_url'].tolist()
     
-    for domain in outlet_domains:
-        for term in query_terms:
-            # URL-encode the query term to handle special characters
-            # safe='' ensures all characters (spaces, &, ", etc.) are encoded
-            encoded_term = quote(term, safe='')
-            
-            # Build the complete query
-            query = f'https://www.google.com/search?q={encoded_term}+site:{domain}+before:{end_date}+after:{start_date}&gl=US&hl=en&brd_json=1'
-            queries.append(query)
+    # for domain in outlet_domains:
+    for url in pressroom_urls:
+        # URL-encode the query term to handle special characters
+        # safe='' ensures all characters (spaces, &, ", etc.) are encoded
+        # encoded_term = quote(term, safe='')
+        
+        # Build the complete query
+        query = f'https://www.google.com/search?q=site:{url}+before:{end_date}+after:{start_date}&gl=US&hl=en&brd_json=1'
+        queries.append(query)
     
-    return queries[5]
+    return queries[0:6]
+
+# Usage
+# Create universal query element variables -- ADD INTERACTIVE SELECTION
+start_date = '2025-12-29'
+end_date = '2026-01-01'
+
+
+# search_queries = create_search_queries(query_terms=query_terms, outlet_domains=outlet_domains, start_date=start_date, end_date=end_date)
+search_queries = create_search_queries(start_date=start_date, end_date=end_date)

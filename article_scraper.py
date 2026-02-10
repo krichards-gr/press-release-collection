@@ -80,8 +80,8 @@ import asent                      # Sentiment analysis for spaCy
 # =============================================================================
 
 # Load SERP results CSV containing article URLs to scrape
-results_df = pd.read_csv('final_df.csv')
-article_urls = results_df["url"].to_list()
+results_df = pd.read_csv('outputs/initial_collected_results.csv')
+article_urls = results_df["link"].to_list()
 
 # Configure browser user-agent to avoid being blocked by websites
 # Some sites return 403 Forbidden without a valid user-agent
@@ -121,6 +121,9 @@ for url in article_urls:
         "keywords": ", " .join(keywords),
         "article_text": article_text
         })
+
+    except NameError:
+        print("Name error")
 
     except:
         print("Unable to retrieve content at:", url)

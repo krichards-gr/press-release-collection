@@ -18,4 +18,5 @@ def grab_reference_data():
     return df
 
 # Usage
-# df = grab_reference_data()
+df = grab_reference_data()
+df.to_csv("reference_data.csv")

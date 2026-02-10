@@ -7,8 +7,8 @@ from generate_queries import create_search_queries
 from collect_results import collect_search_results
 
 # Create universal query element variables -- ADD INTERACTIVE SELECTION
-start_date = '2025-12-29'
-end_date = '2026-01-01'
+start_date = '2026-01-01'
+end_date = '2026-01-09'
 
 
 # if __name__ == "__main__":
@@ -19,4 +19,4 @@ search_queries = create_search_queries(start_date=start_date, end_date=end_date)
 print(search_queries)
 results = collect_search_results(search_queries=search_queries)
 
-
+results.to_csv("outputs/initial_collected_results.csv")
