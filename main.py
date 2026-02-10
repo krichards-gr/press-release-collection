@@ -1,7 +1,4 @@
 from grab_reference_data import grab_reference_data
-df = grab_reference_data()
-
-
 
 # Launch search with Bright Data API
 from brightdata import BrightDataClient
@@ -24,4 +21,5 @@ async with BrightDataClient(token='7fbf58e92c2ac4d51db8745aeab0f4c2cf75fdf067e3a
 
 
 if __name__ == "__main__":
-    main()
+    df = grab_reference_data()
+
