@@ -1,25 +1,19 @@
+# Import required libraries/modules
+import pandas as pd
+
+# Import functions from helper scripts
 from grab_reference_data import grab_reference_data
+from generate_queries import create_search_queries
 
-# Launch search with Bright Data API
-from brightdata import BrightDataClient
-import os
-
-# Google search
-async with BrightDataClient(token='7fbf58e92c2ac4d51db8745aeab0f4c2cf75fdf067e3a1f4aabcdfdc279e735f') as client: 
-    results = await client.search.google(query="site:https://corporate.charter.com/newsroom before:2026-02-09 after:2026-02-01", num_results=10)
-
-    # 1. Convert the list of dictionaries directly to a DataFrame
-    df = pd.DataFrame(results.data)
-
-    # 2. Optional: Clean up or inspect the data
-    print(df.head())
-
-    df.to_csv('final_df.csv')
-
-# def main():
-#     print("Hello from press-release-collection!")
+# Create universal query element variables -- ADD INTERACTIVE SELECTION
+start_date = '2025-12-29'
+end_date = '2026-01-01'
 
 
 if __name__ == "__main__":
     df = grab_reference_data()
+    df.head()
+    # search_queries = create_search_queries(query_terms=query_terms, outlet_domains=outlet_domains, start_date=start_date, end_date=end_date)
+    search_queries = create_search_queries(start_date=start_date, end_date=end_date)
+    print(search_queries[0])
 
