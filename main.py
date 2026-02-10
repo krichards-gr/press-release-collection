@@ -21,10 +21,8 @@ filtered_df = df[df['F100'] & df['newsroom_url'].notna()]['newsroom_url'] # Filt
 from brightdata import BrightDataClient
 import os
 
-client = BrightDataClient()
-
 # Google search
-async with BrightDataClient() as client: 
+async with BrightDataClient(token='7fbf58e92c2ac4d51db8745aeab0f4c2cf75fdf067e3a1f4aabcdfdc279e735f') as client: 
     results = await client.search.google(query="site:https://corporate.charter.com/newsroom before:2026-02-09 after:2026-02-01", num_results=10)
 
     # 1. Convert the list of dictionaries directly to a DataFrame
@@ -32,6 +30,8 @@ async with BrightDataClient() as client:
 
     # 2. Optional: Clean up or inspect the data
     print(df.head())
+
+    df.to_csv('final_df.csv')
 
 # def main():
 #     print("Hello from press-release-collection!")
