@@ -221,8 +221,9 @@ def is_valid_article_url(url: str) -> bool:
     - Home pages: /press, /newsroom, /news (with nothing after)
     - Category/tag pages: /category/, /tag/, /topic/
     - Archive pages: /archive/, /year/
-    - Search results: ?s=, ?search=, ?q=
+    - Search results: ?search=, ?q= (but not section IDs like ?s=123&item=456)
     """
+    import re
     url_lower = url.lower()
 
     # Filter: Pagination URLs
@@ -239,13 +240,23 @@ def is_valid_article_url(url: str) -> bool:
     if any(pattern in url_lower for pattern in ['/category/', '/tag/', '/topic/', '/archive/', '/author/']):
         return False
 
-    # Filter: Search results
-    if any(pattern in url_lower for pattern in ['?s=', '?search=', '?q=', '&s=', '&search=', '&q=']):
+    # Filter: Search results (but allow section IDs like ?s=2429&item=123)
+    # Only filter if it looks like an actual search, not a section/category ID
+
+    # These are always search parameters
+    if any(pattern in url_lower for pattern in ['?search=', '?q=', '&search=', '&q=']):
         return False
+
+    # Special handling for ?s= - only filter if it's NOT followed by &item= (which indicates an article)
+    if '?s=' in url_lower and '&item=' not in url_lower:
+        # Check if the value after ?s= looks like a search term (not just a numeric ID)
+        s_param = re.search(r'\?s=([^&]+)', url_lower)
+        if s_param and not s_param.group(1).isdigit():
+            # It's a word/phrase, likely a search query
+            return False
 
     # Filter: Year-only archives (e.g., /2026/, /2025/)
     # But allow if there's more path after the year (actual articles)
-    import re
     if re.search(r'/\d{4}/?$', url_lower):
         return False
 
