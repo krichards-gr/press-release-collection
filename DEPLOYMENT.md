@@ -18,15 +18,17 @@ This guide covers deploying the press release collection pipeline to Google Clou
 
 3. **Set Up BigQuery Dataset**
    ```bash
-   bq mk --dataset --location=US press_release_collection
+   bq mk --dataset --location=US pressure_monitoring
    ```
+
+   Tables will be auto-created on first run. See [BIGQUERY_SCHEMA.md](BIGQUERY_SCHEMA.md) for schema details.
 
 4. **Configure Environment Variables**
 
    Create a `.env.yaml` file (DO NOT COMMIT):
    ```yaml
    BRIGHT_DATA_PROXY_URL: "http://brd-customer-xxx-zone-xxx:password@brd.superproxy.io:33335"
-   BIGQUERY_DATASET: "press_release_collection"
+   BIGQUERY_DATASET: "pressure_monitoring"
    GCP_PROJECT: "your-project-id"
    ```
 
@@ -77,7 +79,7 @@ gcloud run deploy press-release-collector \
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `BRIGHT_DATA_PROXY_URL` | Bright Data proxy credentials | Yes |
-| `BIGQUERY_DATASET` | BigQuery dataset name | No (default: press_release_collection) |
+| `BIGQUERY_DATASET` | BigQuery dataset name | No (default: pressure_monitoring) |
 | `GCP_PROJECT` | Google Cloud project ID | No (auto-detected) |
 | `MAX_SERP_PAGES` | Pages to collect per query | No (default: 10) |
 | `SCRAPER_MAX_WORKERS` | Concurrent scraper threads | No (default: 10) |
@@ -223,17 +225,27 @@ gcloud run services logs read press-release-collector \
 
 ### BigQuery Monitoring
 
+See [BIGQUERY_SCHEMA.md](BIGQUERY_SCHEMA.md) for detailed schema documentation and query examples.
+
 ```sql
--- Check recent runs
+-- Check recent collection runs
 SELECT
-  run_id,
+  DATE(collection_timestamp) as date,
   COUNT(*) as articles_collected,
-  MIN(collection_timestamp) as start_time,
-  MAX(collection_timestamp) as end_time
-FROM `press_release_collection.enriched_articles`
+  COUNT(DISTINCT scraper_used) as scrapers_used
+FROM `pressure_monitoring.collected_articles`
 WHERE collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
-GROUP BY run_id
-ORDER BY start_time DESC;
+GROUP BY date
+ORDER BY date DESC;
+
+-- Check enrichment coverage
+SELECT
+  COUNT(DISTINCT c.url) as total_articles,
+  COUNT(DISTINCT e.url) as enriched_articles,
+  ROUND(COUNT(DISTINCT e.url) / COUNT(DISTINCT c.url) * 100, 2) as coverage_pct
+FROM `pressure_monitoring.collected_articles` c
+LEFT JOIN `pressure_monitoring.article_enrichments` e ON c.url = e.url
+WHERE c.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY);
 ```
 
 ## Cost Optimization
