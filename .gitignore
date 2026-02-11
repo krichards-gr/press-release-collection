@@ -1,0 +1,33 @@
+# Environment variables (contains secrets)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Outputs (can be regenerated)
+outputs/*.csv
+outputs/*.log
+outputs/checkpoints/
+
+# Keep output directory structure
+!outputs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
