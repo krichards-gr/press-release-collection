@@ -1,119 +1,164 @@
-# # Launch search with Bright Data API
-# from brightdata import BrightDataClient
-# import os
+"""
+SERP Results Collection Module
+================================
 
-# # Google search
-# async with BrightDataClient(token='7fbf58e92c2ac4d51db8745aeab0f4c2cf75fdf067e3a1f4aabcdfdc279e735f') as client: 
-#     results = await client.search.google(query="site:https://corporate.charter.com/newsroom before:2026-02-09 after:2026-02-01", num_results=10)
+Collects search engine results from Google via Bright Data SERP API.
+Handles pagination, retries, and error recovery.
 
-#     # 1. Convert the list of dictionaries directly to a DataFrame
-#     df = pd.DataFrame(results.data)
-
-#     # 2. Optional: Clean up or inspect the data
-#     print(df.head())
-
-#     df.to_csv('final_df.csv')
+Features:
+- Configurable pagination depth (default: 10 pages)
+- Automatic retry logic for transient failures
+- Progress tracking with tqdm
+- Comprehensive error logging
+"""
 
 import json
 import pandas as pd
-from brightdata import BrightDataClient  # Bright Data SDK for SERP API integration
+from brightdata import BrightDataClient
 import requests
+import time
 from typing import List, Optional
+from tqdm import tqdm
+
+from config import config
 
 
-def collect_search_results(search_queries: List[str]) -> Optional[pd.DataFrame]:
+def collect_search_results(search_queries: List[str], max_pages: int = None) -> Optional[pd.DataFrame]:
     """
-    Collect search results from multiple queries, with pagination support through up to 20 pages.
+    Collect search results from multiple queries with pagination and retry logic.
 
     Parameters:
     -----------
     search_queries : List[str]
-        List of constructed search query urls to process
+        List of constructed search query URLs to process
+    max_pages : int, optional
+        Maximum pages to fetch per query (defaults to config.MAX_SERP_PAGES)
 
     Returns:
     --------
     Optional[pd.DataFrame]
         Combined dataframe with all results, or None if no results are found.
     """
+    if max_pages is None:
+        max_pages = config.MAX_SERP_PAGES
 
     # Accumulator for all search results across queries and pages
     full_results = []
+    failed_queries = []
+
+    # Progress bar for queries
+    pbar = tqdm(
+        search_queries,
+        desc="Collecting SERP Results",
+        unit="query",
+        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+    )
 
     # Process each search query
-    for query in search_queries:
-        current_url = query  # Start with the initial query URL
-        page_count = 0       # Track pagination depth
-        max_pages = 2       # Limit to prevent infinite pagination
-        print(f"Processing query: {query}")
+    for query in pbar:
+        current_url = query
+        page_count = 0
+        query_results = []
 
-        # Paginate through results until no more pages or max reached
+        # Paginate through results
         while current_url and page_count < max_pages:
-            # Send request through Bright Data's SERP proxy
-            # The proxy handles Google search requests and returns structured JSON
-            # Credentials format: brd-customer-{customer_id}-zone-{zone_name}:{password}
-            response = requests.get(
-                current_url,
-                proxies={
-                    'http': 'http://brd-customer-hl_bb36cd52-zone-corporate_newsroom_collection:n7766z1i0zmm@brd.superproxy.io:33335',
-                    'https': 'http://brd-customer-hl_bb36cd52-zone-corporate_newsroom_collection:n7766z1i0zmm@brd.superproxy.io:33335'
-                },
-                verify=False,  # SSL verification disabled for proxy
-            )
-            # Try to parse JSON response directly
-            try:
-                parsed = json.loads(response.text)
-            except json.JSONDecodeError:
-                # Fallback: Use Bright Data SDK parser if direct JSON parsing fails
-                # This handles cases where response format is non-standard
-                print("Invalid JSON response, attempting SDK parse")
+            success = False
+
+            # Retry logic for transient failures
+            for attempt in range(config.SERP_RETRY_ATTEMPTS):
                 try:
-                    parsed = BrightDataClient.parse_content(response.text)
-                    print(type(parsed))
-                    print("SDK parse successful, continuing...")
+                    # Send request through Bright Data SERP proxy
+                    response = requests.get(
+                        current_url,
+                        proxies={
+                            'http': config.BRIGHT_DATA_PROXY_URL,
+                            'https': config.BRIGHT_DATA_PROXY_URL
+                        },
+                        timeout=config.SERP_TIMEOUT,
+                        verify=True  # SSL verification enabled for security
+                    )
+                    response.raise_for_status()
+
+                    # Parse JSON response
+                    try:
+                        parsed = json.loads(response.text)
+                    except json.JSONDecodeError:
+                        # Fallback to SDK parser
+                        parsed = BrightDataClient.parse_content(response.text)
+
+                    # Check for organic results
+                    if not parsed.get("organic"):
+                        break  # No more results
+
+                    # Extract and standardize fields
+                    df = pd.DataFrame(parsed["organic"])
+                    required_columns = ["title", "description", "link", "rank"]
+                    for col in required_columns:
+                        if col not in df.columns:
+                            df[col] = None
+
+                    data = df[required_columns]
+                    data["query"] = parsed["general"]["query"]
+                    query_results.append(data)
+
+                    # Get next page
+                    pagination = parsed.get("pagination", {})
+                    next_page_link = pagination.get("next_page_link") if pagination else None
+                    current_url = next_page_link + "&brd_json=1" if next_page_link else None
+
+                    page_count += 1
+                    success = True
+                    break  # Success, exit retry loop
+
+                except requests.exceptions.Timeout:
+                    if attempt < config.SERP_RETRY_ATTEMPTS - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    else:
+                        tqdm.write(f"⚠️  Timeout after {config.SERP_RETRY_ATTEMPTS} attempts: {current_url[:100]}...")
+                        break
+
+                except requests.exceptions.RequestException as e:
+                    if attempt < config.SERP_RETRY_ATTEMPTS - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    else:
+                        tqdm.write(f"⚠️  Request failed: {str(e)[:100]}")
+                        break
+
                 except Exception as e:
-                    print(f"SDK parse failed: {e}")
-                    current_url = None
+                    tqdm.write(f"⚠️  Unexpected error: {str(e)[:100]}")
                     break
 
-            # Check if organic (non-ad) results exist; exit if none
-            if not parsed.get("organic"):
-                current_url = None
-                break
+            if not success and page_count == 0:
+                # Failed to get even the first page
+                failed_queries.append(query)
 
-            # Extract key fields from organic search results
-            # Fields: title, description, link, rank (position on page)
-            # Extract key fields from organic search results
-            # Fields: title, description, link, rank (position on page)
-            df = pd.DataFrame(parsed["organic"])
-            required_columns = ["title", "description", "link", "rank"]
-            for col in required_columns:
-                if col not in df.columns:
-                    df[col] = None  # Fill missing columns with None
-            
-            data = df[required_columns]
-            # Add the query string for later company name matching
-            data["query"] = parsed["general"]["query"]
-            full_results.append(data)
+        # Add this query's results to the full collection
+        if query_results:
+            full_results.extend(query_results)
 
-            # Check for next page link -- default None
-            try:
-                pagination = parsed.get("pagination", {})
-                next_page_link = (
-                    pagination.get("next_page_link") if pagination else None
-                )
-                current_url = next_page_link + "&brd_json=1" if next_page_link else None
+        # Update progress bar
+        pbar.set_postfix(
+            pages=page_count,
+            results=sum(len(df) for df in full_results)
+        )
 
-            except (KeyError, IndexError):
-                current_url = None
+    pbar.close()
 
-            page_count += 1
-            print(f"Page {page_count}: Next URL: {current_url}")
+    # Report on failed queries
+    if failed_queries:
+        print(f"\n⚠️  {len(failed_queries)} queries failed completely:")
+        for fq in failed_queries[:5]:  # Show first 5
+            print(f"   - {fq[:100]}...")
+        if len(failed_queries) > 5:
+            print(f"   ... and {len(failed_queries) - 5} more")
 
     # Combine all results into final dataframe
     if full_results:
         final_df = pd.concat(full_results, ignore_index=True)
-        print(f"{len(final_df)} results collected!")
+        print(f"\n✅ Collected {len(final_df):,} SERP results from {len(search_queries)} queries")
         return final_df
     else:
-        print("No Results Returned")
+        print("\n⚠️  No results returned from any query")
         return None
