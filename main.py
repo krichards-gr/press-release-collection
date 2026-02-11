@@ -27,6 +27,7 @@ from config import config
 from grab_reference_data import grab_reference_data
 from generate_queries import create_search_queries
 from collect_results import collect_search_results
+from deduplication import URLTracker, deduplicate_serp_results
 
 
 def parse_arguments():
@@ -139,9 +140,21 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, sk
             print("❌ No SERP results collected. Exiting.")
             sys.exit(1)
 
+        # Deduplicate against previously processed URLs
+        print("\n🔄 Deduplicating Results")
+        print("-" * 80)
+        tracker = URLTracker()
+        original_count = len(results_df)
+        results_df = deduplicate_serp_results(results_df, tracker)
+
+        if len(results_df) == 0:
+            print("⚠️  All URLs have been processed before. No new articles to scrape.")
+            print("   Use --force-refresh to reprocess all URLs")
+            sys.exit(0)
+
         # Save SERP results
         results_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
-        print(f"💾 Saved SERP results to: {config.COLLECTED_RESULTS_FILE}")
+        print(f"💾 Saved {len(results_df):,} new SERP results to: {config.COLLECTED_RESULTS_FILE}")
         print()
 
         # =====================================================================
@@ -167,6 +180,9 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, sk
                     print(f"⚠️  Article scraper exited with code {result.returncode}")
                 else:
                     print()
+                    # Mark successfully scraped URLs as processed
+                    tracker.mark_batch_as_processed(results_df['link'].tolist())
+                    tracker.save_processed_urls()
 
             except Exception as e:
                 print(f"❌ Article scraper failed: {e}")
