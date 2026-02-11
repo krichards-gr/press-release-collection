@@ -28,6 +28,7 @@ from grab_reference_data import grab_reference_data
 from generate_queries import create_search_queries
 from collect_results import collect_search_results
 from deduplication import URLTracker, deduplicate_serp_results
+from checkpointing import CheckpointManager, resume_from_checkpoint
 
 
 def parse_arguments():
@@ -62,6 +63,18 @@ def parse_arguments():
         help='Skip article scraping (SERP collection only)'
     )
 
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from latest checkpoint (if available)'
+    )
+
+    parser.add_argument(
+        '--no-checkpoints',
+        action='store_true',
+        help='Disable checkpointing'
+    )
+
     return parser.parse_args()
 
 
@@ -85,7 +98,8 @@ def validate_dates(start_date: str, end_date: str) -> tuple[str, str]:
         sys.exit(1)
 
 
-def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, skip_scraping: bool = False):
+def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
+                  skip_scraping: bool = False, resume: bool = False, use_checkpoints: bool = True):
     """
     Execute the complete press release collection pipeline.
 
@@ -94,7 +108,18 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, sk
         end_date: End date in YYYY-MM-DD format
         force_refresh: Force refresh of cached data
         skip_scraping: Skip article scraping step
+        resume: Resume from latest checkpoint
+        use_checkpoints: Enable checkpointing
     """
+    # Initialize checkpoint manager
+    checkpoint_manager = None
+    if resume:
+        checkpoint_manager = resume_from_checkpoint()
+        if checkpoint_manager:
+            print("✅ Resuming from checkpoint\n")
+    elif use_checkpoints:
+        checkpoint_manager = CheckpointManager()
+        print(f"💾 Checkpointing enabled (run ID: {checkpoint_manager.run_id})\n")
     print("="*80)
     print("PRESS RELEASE COLLECTION PIPELINE")
     print("="*80)
@@ -106,15 +131,23 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, sk
         # =====================================================================
         # STEP 1: Fetch Company Reference Data
         # =====================================================================
-        print("📊 STEP 1: Fetching Company Reference Data")
-        print("-" * 80)
-        reference_df = grab_reference_data(force_refresh=force_refresh)
+        if checkpoint_manager and checkpoint_manager.has_checkpoint('reference_data'):
+            print("📊 STEP 1: Loading Reference Data from Checkpoint")
+            print("-" * 80)
+            reference_df = checkpoint_manager.load_checkpoint('reference_data')
+            print(f"✓ Loaded {len(reference_df):,} companies from checkpoint\n")
+        else:
+            print("📊 STEP 1: Fetching Company Reference Data")
+            print("-" * 80)
+            reference_df = grab_reference_data(force_refresh=force_refresh)
 
-        if reference_df.empty:
-            print("❌ No reference data found. Exiting.")
-            sys.exit(1)
+            if reference_df.empty:
+                print("❌ No reference data found. Exiting.")
+                sys.exit(1)
 
-        print()
+            if checkpoint_manager:
+                checkpoint_manager.save_checkpoint('reference_data', reference_df, "F100 company reference data")
+            print()
 
         # =====================================================================
         # STEP 2: Generate Search Queries
@@ -132,13 +165,22 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False, sk
         # =====================================================================
         # STEP 3: Collect SERP Results
         # =====================================================================
-        print("🌐 STEP 3: Collecting SERP Results")
-        print("-" * 80)
-        results_df = collect_search_results(search_queries=search_queries)
+        if checkpoint_manager and checkpoint_manager.has_checkpoint('serp_results'):
+            print("🌐 STEP 3: Loading SERP Results from Checkpoint")
+            print("-" * 80)
+            results_df = checkpoint_manager.load_checkpoint('serp_results')
+            print(f"✓ Loaded {len(results_df):,} SERP results from checkpoint\n")
+        else:
+            print("🌐 STEP 3: Collecting SERP Results")
+            print("-" * 80)
+            results_df = collect_search_results(search_queries=search_queries)
 
-        if results_df is None or results_df.empty:
-            print("❌ No SERP results collected. Exiting.")
-            sys.exit(1)
+            if results_df is None or results_df.empty:
+                print("❌ No SERP results collected. Exiting.")
+                sys.exit(1)
+
+            if checkpoint_manager:
+                checkpoint_manager.save_checkpoint('serp_results', results_df, "Raw SERP results")
 
         # Deduplicate against previously processed URLs
         print("\n🔄 Deduplicating Results")
@@ -227,5 +269,7 @@ if __name__ == "__main__":
         start_date=start_date,
         end_date=end_date,
         force_refresh=args.force_refresh,
-        skip_scraping=args.skip_scraping
+        skip_scraping=args.skip_scraping,
+        resume=args.resume,
+        use_checkpoints=not args.no_checkpoints
     )
