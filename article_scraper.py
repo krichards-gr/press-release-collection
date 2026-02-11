@@ -95,6 +95,7 @@ class ScraperMetrics:
     def __init__(self):
         self.lock = Lock()
         self.total = 0
+        self.filtered = 0  # URLs skipped due to validation
         self.successful = 0
         self.failed = 0
         self.error_counts = Counter()
@@ -108,6 +109,11 @@ class ScraperMetrics:
         with self.lock:
             self.total = total
             self.start_time = time.time()
+
+    def record_filtered(self):
+        """Record a URL that was filtered out (not an article)."""
+        with self.lock:
+            self.filtered += 1
 
     def record_success(self, processing_time: float, scraper_used: str = "unknown"):
         """Record a successful scrape."""
@@ -144,19 +150,31 @@ class ScraperMetrics:
             success_rate = (self.successful / self.total * 100) if self.total > 0 else 0
             avg_time = sum(self.processing_times) / len(self.processing_times) if self.processing_times else 0
 
+            # Calculate percentages
+            attempted = self.total - self.filtered  # URLs actually scraped
+
             report = [
                 "\n" + "="*80,
                 "ARTICLE SCRAPER EXECUTION REPORT",
                 "="*80,
                 f"\n📊 OVERALL STATISTICS:",
-                f"   Total URLs Processed:     {self.total:,}",
+                f"   Total URLs Found:         {self.total:,}",
+            ]
+
+            # Show filtered URLs if any
+            if self.filtered > 0:
+                filter_pct = (self.filtered / self.total * 100) if self.total > 0 else 0
+                report.append(f"   🚫 Filtered (non-articles): {self.filtered:,} ({filter_pct:.1f}%)")
+                report.append(f"   → URLs Attempted:         {attempted:,}")
+
+            report.extend([
                 f"   ✓ Successful:             {self.successful:,} ({success_rate:.1f}%)",
                 f"   ✗ Failed:                 {self.failed:,} ({100-success_rate:.1f}%)",
                 f"\n⏱  PERFORMANCE METRICS:",
                 f"   Total Execution Time:     {elapsed_time:.2f}s ({elapsed_time/60:.1f}m)",
                 f"   Average Time per Article: {avg_time:.2f}s",
-                f"   Throughput:               {self.total/elapsed_time:.2f} articles/sec",
-            ]
+                f"   Throughput:               {attempted/elapsed_time:.2f} articles/sec",
+            ])
 
             # Show which scrapers succeeded
             if self.scraper_counts:
@@ -187,6 +205,53 @@ class ScraperMetrics:
             error_df.to_csv(filepath, index=False)
             return True
         return False
+
+# =============================================================================
+# URL VALIDATION
+# =============================================================================
+
+def is_valid_article_url(url: str) -> bool:
+    """
+    Check if a URL looks like an actual article (not a pagination/index/home page).
+
+    Returns True if URL appears to be an article, False if it's likely a listing page.
+
+    Common patterns we filter out:
+    - Pagination pages: ?page=3, &page=2, /page/5
+    - Home pages: /press, /newsroom, /news (with nothing after)
+    - Category/tag pages: /category/, /tag/, /topic/
+    - Archive pages: /archive/, /year/
+    - Search results: ?s=, ?search=, ?q=
+    """
+    url_lower = url.lower()
+
+    # Filter: Pagination URLs
+    if any(pattern in url_lower for pattern in ['?page=', '&page=', '/page/']):
+        return False
+
+    # Filter: Home/index pages (ending with directory names but no article slug)
+    # Examples: /press, /newsroom, /news-releases/
+    path_ends = ['/press', '/newsroom', '/news', '/press-releases', '/media', '/press-release']
+    if any(url_lower.rstrip('/').endswith(ending) for ending in path_ends):
+        return False
+
+    # Filter: Category, tag, archive pages
+    if any(pattern in url_lower for pattern in ['/category/', '/tag/', '/topic/', '/archive/', '/author/']):
+        return False
+
+    # Filter: Search results
+    if any(pattern in url_lower for pattern in ['?s=', '?search=', '?q=', '&s=', '&search=', '&q=']):
+        return False
+
+    # Filter: Year-only archives (e.g., /2026/, /2025/)
+    # But allow if there's more path after the year (actual articles)
+    import re
+    if re.search(r'/\d{4}/?$', url_lower):
+        return False
+
+    # Passed all filters - looks like an article!
+    return True
+
 
 # =============================================================================
 # INDIVIDUAL SCRAPER FUNCTIONS
@@ -383,20 +448,25 @@ def scrape_single_article(url: str, config: Config, metrics: ScraperMetrics) -> 
     return None
 
 
-def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS) -> List[Dict]:
+def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS,
+                               total_urls: int = None, filtered_urls: int = 0) -> List[Dict]:
     """
     Scrape multiple articles concurrently with progress tracking.
 
     Args:
         urls: List of article URLs to scrape
         max_workers: Maximum number of concurrent threads
+        total_urls: Total URLs before filtering (for metrics)
+        filtered_urls: Number of URLs filtered out (for metrics)
 
     Returns:
         List of dictionaries containing scraped article data
     """
     # Initialize metrics tracker
     metrics = ScraperMetrics()
-    metrics.start(len(urls))
+    metrics.total = total_urls if total_urls else len(urls)
+    metrics.filtered = filtered_urls
+    metrics.start_time = time.time()
 
     # Configure newspaper
     config = Config()
@@ -463,11 +533,35 @@ if __name__ == "__main__":
     print("📂 Loading SERP results...")
     results_df = pd.read_csv('outputs/f100_collected_results.csv')
     results_df = results_df.rename(columns={"link": "url"})
-    article_urls = results_df["url"].to_list()
-    print(f"   Found {len(article_urls):,} URLs to process\n")
+    all_urls = results_df["url"].to_list()
+    print(f"   Found {len(all_urls):,} URLs from SERP results")
+
+    # Filter out non-article URLs (pagination, home pages, etc.)
+    print("\n🔍 Filtering URLs...")
+    article_urls = []
+    filtered_urls_list = []
+
+    for url in all_urls:
+        if is_valid_article_url(url):
+            article_urls.append(url)
+        else:
+            filtered_urls_list.append(url)
+
+    filtered_count = len(filtered_urls_list)
+
+    if filtered_count > 0:
+        print(f"   🚫 Filtered out {filtered_count:,} non-article URLs (pagination, home pages, etc.)")
+        print(f"   ✓ {len(article_urls):,} valid article URLs to scrape")
+
+        # Save filtered URLs for review
+        filtered_df = pd.DataFrame({'url': filtered_urls_list, 'reason': 'Non-article URL (pagination/index/home page)'})
+        filtered_df.to_csv('outputs/filtered_urls.csv', index=False)
+        print(f"   📝 Filtered URLs saved to outputs/filtered_urls.csv\n")
+    else:
+        print(f"   ✓ All {len(article_urls):,} URLs appear to be articles\n")
 
     # Scrape articles concurrently
-    scraped_articles = scrape_articles_concurrent(article_urls)
+    scraped_articles = scrape_articles_concurrent(article_urls, total_urls=len(all_urls), filtered_urls=filtered_count)
 
     # Convert to DataFrame and remove duplicates
     print("\n📊 Processing results...")
