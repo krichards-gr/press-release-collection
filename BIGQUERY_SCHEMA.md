@@ -2,7 +2,10 @@
 
 ## Dataset: `pressure_monitoring`
 
-This dataset contains press release collection data with a 2-table design that separates raw content from enrichments.
+This dataset contains press release collection data with a 3-table design:
+1. **collected_articles** - Raw SERP + scraped content (immutable)
+2. **article_enrichments** - Analysis results (sentiment, entities, issues)
+3. **collection_runs** - Pipeline execution tracking (idempotency & backfill)
 
 ---
 
@@ -94,6 +97,80 @@ WITH latest_enrichments AS (
 SELECT *
 FROM latest_enrichments
 WHERE rn = 1;
+```
+
+---
+
+## Table 3: `collection_runs`
+
+**Purpose**: Tracks pipeline execution for idempotency and backfill support.
+
+**Schema**:
+
+| Column | Type | Mode | Description |
+|--------|------|------|-------------|
+| `run_id` | STRING | REQUIRED | Unique run identifier (YYYYMMDD_HHMMSS) |
+| `start_date` | DATE | REQUIRED | Start of date range collected |
+| `end_date` | DATE | REQUIRED | End of date range collected |
+| `companies_processed` | STRING | REPEATED | List of company identifiers processed |
+| `queries_executed` | STRING | REPEATED | Search queries executed (for SERP API deduplication) |
+| `queries_count` | INTEGER | NULLABLE | Number of queries executed |
+| `urls_collected` | INTEGER | NULLABLE | Number of URLs collected |
+| `articles_scraped` | INTEGER | NULLABLE | Number of articles successfully scraped |
+| `status` | STRING | REQUIRED | Run status: started, completed, failed |
+| `start_timestamp` | TIMESTAMP | REQUIRED | When run started |
+| `end_timestamp` | TIMESTAMP | NULLABLE | When run completed/failed |
+| `error_message` | STRING | NULLABLE | Error message if failed |
+
+**Features**:
+- **Partitioned** by `start_timestamp` (day)
+- **Idempotency**: Prevents duplicate data collection
+- **Backfill Tracking**: Identifies new URLs needing historical data
+- **Run Auditing**: Complete history of pipeline executions
+
+**Example Query**:
+```sql
+-- Get recent pipeline runs with success rates
+SELECT
+  run_id,
+  start_date,
+  end_date,
+  status,
+  urls_collected,
+  articles_scraped,
+  ROUND(articles_scraped / urls_collected * 100, 2) as scrape_success_rate,
+  TIMESTAMP_DIFF(end_timestamp, start_timestamp, SECOND) as duration_seconds
+FROM `pressure_monitoring.collection_runs`
+WHERE start_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+ORDER BY start_timestamp DESC;
+```
+
+**Query-Level Deduplication** (saves SERP API costs):
+```sql
+-- Check which queries have been executed for a specific company
+SELECT DISTINCT query
+FROM `pressure_monitoring.collection_runs`,
+UNNEST(queries_executed) AS query
+WHERE status = 'completed'
+  AND query LIKE '%site:company.com%'
+ORDER BY query;
+```
+
+**Cost Savings Analysis**:
+```sql
+-- Compare queries generated vs. executed (shows SERP API savings)
+SELECT
+  run_id,
+  start_date,
+  end_date,
+  -- Note: queries_generated not stored (calculated in-memory)
+  queries_count as queries_executed,
+  urls_collected,
+  ROUND(urls_collected / queries_count, 2) as avg_urls_per_query
+FROM `pressure_monitoring.collection_runs`
+WHERE status = 'completed'
+ORDER BY start_timestamp DESC
+LIMIT 10;
 ```
 
 ---

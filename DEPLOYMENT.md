@@ -121,6 +121,54 @@ curl -X POST $SERVICE_URL \
   }'
 ```
 
+## Pipeline Features
+
+### Idempotency & Cost Optimization
+
+The pipeline prevents duplicate data collection at **two levels**:
+
+1. **Query-Level Deduplication** (BEFORE SERP API):
+   - Checks which search queries have been executed
+   - Skips already-executed queries
+   - **Saves SERP API costs** by not re-querying
+
+2. **Intelligent Re-runs**:
+   - Tracks executed queries in `collection_runs` table
+   - Running same date range multiple times = minimal API costs
+   - Only new queries are executed
+
+**Cost Impact**: Running `2026-01-01` to `2026-01-07` twice:
+- **First run**: Executes 100 queries → collects data
+- **Second run**: Skips all 100 queries → $0 SERP costs
+
+Example: Add a new company → next run only queries that company, skips all existing companies.
+
+### Automatic Backfill
+
+When new URLs (companies) are added to the reference data:
+
+- **Detection**: Pipeline identifies URLs not yet in BigQuery
+- **Backfill**: Automatically collects data from **2026-01-01** to `end_date`
+- **Seamless**: Happens automatically on next run, no manual intervention
+
+Example: Add a new company → Next run will backfill from 2026-01-01.
+
+### Force Refresh
+
+Use `force_refresh: true` to bypass deduplication and collect everything:
+
+```json
+{
+  "start_date": "2026-01-01",
+  "end_date": "2026-01-31",
+  "force_refresh": true
+}
+```
+
+⚠️ **Warning**: This will create duplicate records in BigQuery. Use only when necessary.
+
+---
+
 ## API Usage
 
 ### Request Format

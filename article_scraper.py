@@ -8,10 +8,10 @@ It enhances the basic SERP data with full text, summaries, keywords, and sentime
 Workflow:
 ---------
 1. Reads CSV with article URLs from SERP collection
-2. Downloads and parses each article using newspaper3k (with concurrent processing)
+2. Downloads and parses each article using multi-scraper fallback chain (with concurrent processing)
 3. Applies NLP to extract keywords and generate summaries
 4. Performs sentiment analysis using spaCy + asent
-5. Joins scraped content with original SERP metadata
+5. Joins scraped content with original SERP metadata (SERP title/description take precedence)
 6. Outputs enriched article data and detailed execution report
 
 Input Required:
@@ -289,7 +289,6 @@ def scrape_with_newspaper(url: str, config: Config) -> Optional[Dict]:
             return None
 
         return {
-            "title": article.title,
             "url": url,
             "summary": article.summary,
             "publish_date": article.publish_date,
@@ -323,7 +322,6 @@ def scrape_with_trafilatura(url: str) -> Optional[Dict]:
         metadata = trafilatura.extract_metadata(response.text)
 
         return {
-            "title": metadata.title if metadata and metadata.title else "",
             "url": url,
             "summary": "",  # trafilatura doesn't generate summaries
             "publish_date": metadata.date if metadata and metadata.date else None,
@@ -358,7 +356,6 @@ def scrape_with_readability(url: str) -> Optional[Dict]:
             return None
 
         return {
-            "title": doc.title(),
             "url": url,
             "summary": "",
             "publish_date": None,
@@ -386,7 +383,6 @@ def scrape_with_goose(url: str) -> Optional[Dict]:
                 return None
 
             return {
-                "title": article.title,
                 "url": url,
                 "summary": article.meta_description or "",
                 "publish_date": article.publish_date,
@@ -583,6 +579,8 @@ if __name__ == "__main__":
         print(f"   Removed {len(output_articles) - len(output_articles_deduped)} duplicate entries")
 
         # Merge scraped content back with original SERP data
+        # Note: Scrapers return only content fields (article_text, summary, keywords, etc.)
+        # Title and description come from SERP data to avoid duplicate columns
         joined = pd.merge(left=results_df, right=output_articles_deduped, how='left', on='url')
         joined.to_csv("outputs/f100_joined.csv", index=False)
         print(f"   ✓ Saved joined data to outputs/f100_joined.csv")

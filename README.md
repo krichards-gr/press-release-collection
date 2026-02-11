@@ -68,21 +68,38 @@ All settings centralized in `config.py`:
 
 ### Cloud Run (Production)
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide.
+**Quick Start**: Run the automated deployment script:
+
+```powershell
+# Windows
+.\deploy.ps1
+```
 
 ```bash
-# Deploy to Cloud Run
-gcloud run deploy press-release-collector \
-  --source . \
-  --region us-central1 \
-  --env-vars-file .env.yaml
+# Mac/Linux
+chmod +x deploy.sh
+./deploy.sh
+```
 
-# Invoke via HTTP
+**What it does**:
+- ✅ Deploys to Cloud Run from GitHub
+- ✅ Sets up Cloud Scheduler (3 daily runs: midnight, noon, 4pm EST)
+- ✅ Configures BigQuery and Secret Manager
+- ✅ Includes idempotency and automatic backfill
+
+**Deployment Guides**:
+- [DEPLOY_FROM_GITHUB.md](DEPLOY_FROM_GITHUB.md) - Deploy from GitHub repository (recommended)
+- [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) - Quick checklist and testing
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Advanced deployment options
+
+**Test Deployment**:
+```bash
 curl -X POST $SERVICE_URL \
   -H "Content-Type: application/json" \
   -d '{
-    "start_date": "2026-01-01",
-    "end_date": "2026-01-31"
+    "start_date": "2026-02-10",
+    "end_date": "2026-02-11",
+    "skip_scraping": true
   }'
 ```
 
