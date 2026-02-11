@@ -71,8 +71,8 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     response = requests.get(
                         current_url,
                         proxies={
-                            'http': config.BRIGHT_DATA_PROXY_URL,
-                            'https': config.BRIGHT_DATA_PROXY_URL
+                            'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
+                            'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
                         },
                         timeout=config.SERP_TIMEOUT,
                         verify=True  # SSL verification enabled for security
@@ -137,6 +137,9 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         # Add this query's results to the full collection
         if query_results:
             full_results.extend(query_results)
+
+        # Rate limiting: small delay between queries to avoid 429 errors
+        time.sleep(0.5)  # 500ms delay between queries
 
         # Update progress bar
         pbar.set_postfix(

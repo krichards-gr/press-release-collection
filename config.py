@@ -41,10 +41,22 @@ class Config:
     # =============================================================================
     # BRIGHT DATA SERP API
     # =============================================================================
-    BRIGHT_DATA_PROXY_URL = os.getenv(
-        'BRIGHT_DATA_PROXY_URL',
+    BRIGHT_DATA_PROXY_URL_HTTP = os.getenv(
+        'BRIGHT_DATA_PROXY_URL_HTTP',
         ''  # No default - require environment variable
     )
+
+    BRIGHT_DATA_PROXY_URL_HTTPS = os.getenv(
+        'BRIGHT_DATA_PROXY_URL_HTTPS',
+        ''  # No default - require environment variable
+    )
+
+    # Backwards compatibility - if old variable exists, use it for both
+    BRIGHT_DATA_PROXY_URL = os.getenv('BRIGHT_DATA_PROXY_URL', '')
+    if BRIGHT_DATA_PROXY_URL and not BRIGHT_DATA_PROXY_URL_HTTP:
+        BRIGHT_DATA_PROXY_URL_HTTP = BRIGHT_DATA_PROXY_URL
+    if BRIGHT_DATA_PROXY_URL and not BRIGHT_DATA_PROXY_URL_HTTPS:
+        BRIGHT_DATA_PROXY_URL_HTTPS = BRIGHT_DATA_PROXY_URL
 
     # SERP collection settings
     MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '10'))  # Increased from 2
