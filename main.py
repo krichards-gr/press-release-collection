@@ -108,12 +108,9 @@ def run_serp_collection(start_date: str, end_date: str, force_refresh: bool, run
 
     stats['serp_results_count'] = len(serp_df)
 
-    # Step 4: Write to BigQuery
-    print(f"[{run_id}] Writing SERP results to BigQuery...")
+    # Step 4: Save SERP results to CSV (for article scraper to read)
+    print(f"[{run_id}] Saving SERP results...")
     serp_df = serp_df.rename(columns={"link": "url"}) if "link" in serp_df.columns else serp_df
-    storage.write_serp_results(serp_df, run_id=run_id)
-
-    # Optional: Also save to CSV for backup/debugging
     serp_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
 
     return stats
@@ -148,23 +145,27 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
     # Load results and write to BigQuery
     import pandas as pd
 
-    # Load joined results
+    # Load joined results (SERP + scraped content)
     if config.JOINED_RESULTS_FILE.exists():
         joined_df = pd.read_csv(config.JOINED_RESULTS_FILE)
         stats['articles_scraped'] = len(joined_df[joined_df['article_text'].notna()])
 
-        # Write scraped articles to BigQuery
-        scraped_df = joined_df[joined_df['article_text'].notna()].copy()
-        if not scraped_df.empty:
-            storage.write_scraped_articles(scraped_df, run_id=run_id)
+        # Write all collected articles to BigQuery (SERP + content)
+        # This goes into the collected_articles table
+        if not joined_df.empty:
+            storage.write_collected_articles(joined_df, run_id=run_id)
 
-    # Load enriched results
+    # Load enriched results (just sentiment for now)
     if config.ENRICHED_RESULTS_FILE.exists():
         enriched_df = pd.read_csv(config.ENRICHED_RESULTS_FILE)
         stats['articles_enriched'] = len(enriched_df)
 
-        # Write enriched articles to BigQuery
-        storage.write_enriched_articles(enriched_df, run_id=run_id)
+        # Write enrichments to separate table (url + sentiment)
+        # This goes into the article_enrichments table
+        if not enriched_df.empty:
+            enrichments_only = enriched_df[['url', 'sentiment']].copy()
+            # Could add sentiment_score here in future
+            storage.write_article_enrichments(enrichments_only, run_id=run_id, enrichment_version="v1.0")
 
     return stats
 
