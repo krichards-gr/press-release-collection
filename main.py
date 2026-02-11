@@ -20,6 +20,7 @@ Examples:
 
 import argparse
 import sys
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -75,7 +76,49 @@ def parse_arguments():
         help='Disable checkpointing'
     )
 
+    parser.add_argument(
+        '--incremental',
+        action='store_true',
+        help='Incremental mode: process only articles since last run'
+    )
+
+    parser.add_argument(
+        '--last-n-days',
+        type=int,
+        metavar='N',
+        help='Process articles from the last N days (shortcut for incremental)'
+    )
+
     return parser.parse_args()
+
+
+def find_last_run_date() -> str:
+    """
+    Find the end date from the most recent pipeline run.
+
+    Returns:
+        Date string in YYYY-MM-DD format, or None if no previous run found
+    """
+    # Check checkpoint metadata
+    from checkpointing import find_latest_run
+    latest_run = find_latest_run()
+
+    if latest_run:
+        checkpoint_dir = config.CHECKPOINT_DIR / latest_run
+        metadata_file = checkpoint_dir / "metadata.json"
+
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+
+                # Look for end_date in metadata
+                if 'pipeline_info' in metadata and 'end_date' in metadata['pipeline_info']:
+                    return metadata['pipeline_info']['end_date']
+            except:
+                pass
+
+    return None
 
 
 def validate_dates(start_date: str, end_date: str) -> tuple[str, str]:
@@ -120,6 +163,15 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
     elif use_checkpoints:
         checkpoint_manager = CheckpointManager()
         print(f"💾 Checkpointing enabled (run ID: {checkpoint_manager.run_id})\n")
+
+        # Save pipeline info to metadata
+        if checkpoint_manager:
+            checkpoint_manager.metadata['pipeline_info'] = {
+                'start_date': start_date,
+                'end_date': end_date,
+                'timestamp': datetime.now().isoformat()
+            }
+            checkpoint_manager._save_metadata()
     print("="*80)
     print("PRESS RELEASE COLLECTION PIPELINE")
     print("="*80)
@@ -261,8 +313,28 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
 if __name__ == "__main__":
     args = parse_arguments()
 
+    # Handle incremental modes
+    start_date = args.start_date
+    end_date = args.end_date
+
+    if args.last_n_days:
+        # Process last N days
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=args.last_n_days)).strftime('%Y-%m-%d')
+        print(f"🔄 Incremental mode: Last {args.last_n_days} days ({start_date} to {end_date})")
+
+    elif args.incremental:
+        # Try to find last run date from checkpoints or processed URLs
+        last_run_date = find_last_run_date()
+        if last_run_date:
+            start_date = last_run_date
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            print(f"🔄 Incremental mode: From last run ({start_date} to {end_date})")
+        else:
+            print("⚠️  No previous run found, using default date range")
+
     # Validate dates
-    start_date, end_date = validate_dates(args.start_date, args.end_date)
+    start_date, end_date = validate_dates(start_date, end_date)
 
     # Run the pipeline
     run_pipeline(
