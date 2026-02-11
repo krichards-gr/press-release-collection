@@ -40,13 +40,13 @@ def create_search_queries(start_date, end_date):
         query = f'https://www.google.com/search?q=site:{url}+before:{end_date}+after:{start_date}&gl=US&hl=en&brd_json=1'
         queries.append(query)
     
-    return queries[0:6]
+    return queries
 
 # Usage
 # Create universal query element variables -- ADD INTERACTIVE SELECTION
-start_date = '2025-12-29'
-end_date = '2026-01-01'
+# start_date = '2025-12-29'
+# end_date = '2026-01-01'
 
 
-# search_queries = create_search_queries(query_terms=query_terms, outlet_domains=outlet_domains, start_date=start_date, end_date=end_date)
-search_queries = create_search_queries(start_date=start_date, end_date=end_date)
+# # search_queries = create_search_queries(query_terms=query_terms, outlet_domains=outlet_domains, start_date=start_date, end_date=end_date)
+# search_queries = create_search_queries(start_date=start_date, end_date=end_date)

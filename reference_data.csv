@@ -1,27 +1,27 @@
 ,corporation,sector,newsroom_url
 0,AT&T,Communications Services,https://about.att.com/
-1,Youtube,Communications Services,https://blog.youtube/news-and-events/
-2,Google,Communications Services,https://blog.google/press/
+1,Google,Communications Services,https://blog.google/press/
+2,Youtube,Communications Services,https://blog.youtube/news-and-events/
 3,Charter Communications/Spectrum,Communications Services,https://corporate.charter.com/newsroom
-4,NBC Universal,Communications Services,https://www.nbcuniversal.com/newsroom
-5,Comcast,Communications Services,https://corporate.comcast.com/press
-6,Shopbop,Consumer Discretionary,https://www.aboutamazon.com/news
-7,Amazon,Consumer Discretionary,https://press.aboutamazon.com/press-release-archive
+4,Comcast,Communications Services,https://corporate.comcast.com/press
+5,NBC Universal,Communications Services,https://www.nbcuniversal.com/newsroom
+6,Amazon,Consumer Discretionary,https://press.aboutamazon.com/press-release-archive
+7,Shopbop,Consumer Discretionary,https://www.aboutamazon.com/news
 8,Jazwares,Consumer Discretionary,https://jazwares.ca/newsroom
 9,General Motors,Consumer Discretionary,https://news.gm.com/newsroom.html
 10,Home Depot,Consumer Discretionary,https://corporate.homedepot.com/page/newsroom
 11,Lowe's,Consumer Discretionary,https://corporate.lowes.com/newsroom/press-releases
 12,Xbox,Consumer Discretionary,https://news.xbox.com/en-us/?xr=footnav
 13,Nike,Consumer Discretionary,https://about.nike.com/en/newsroom
-14,Tide,Consumer Discretionary,https://us.pg.com/newsroom/
-15,Olay,Consumer Discretionary,https://us.pg.com/newsroom/
-16,Bounty,Consumer Discretionary,https://us.pg.com/newsroom/
-17,Secret,Consumer Discretionary,https://us.pg.com/newsroom/
-18,Old Spice,Consumer Discretionary,https://news.pg.com/news-releases/news-details/2023/Old-Spice-Delivers-Smelf-Confidence-Under-the-Spotlight-with-New-Musical-Inspired-Campaign/default.aspx
+14,Pantene,Consumer Discretionary,https://us.pg.com/newsroom/
+15,Vick's,Consumer Discretionary,https://us.pg.com/newsroom/
+16,Old Spice,Consumer Discretionary,https://news.pg.com/news-releases/news-details/2023/Old-Spice-Delivers-Smelf-Confidence-Under-the-Spotlight-with-New-Musical-Inspired-Campaign/default.aspx
+17,Gillette,Consumer Discretionary,https://us.pg.com/newsroom/
+18,Bounty,Consumer Discretionary,https://us.pg.com/newsroom/
 19,Bounce,Consumer Discretionary,https://us.pg.com/newsroom/
-20,Pantene,Consumer Discretionary,https://us.pg.com/newsroom/
-21,Vick's,Consumer Discretionary,https://us.pg.com/newsroom/
-22,Gillette,Consumer Discretionary,https://us.pg.com/newsroom/
+20,Tide,Consumer Discretionary,https://us.pg.com/newsroom/
+21,Secret,Consumer Discretionary,https://us.pg.com/newsroom/
+22,Olay,Consumer Discretionary,https://us.pg.com/newsroom/
 23,Target,Consumer Discretionary,https://corporate.target.com/press
 24,Tesla,Consumer Discretionary,https://www.tesla.com/blog
 25,Walmart,Consumer Discretionary,https://corporate.walmart.com/content/corporate/en_us/news.html
@@ -32,12 +32,12 @@
 30,Costco,Consumer Staples,https://investor.costco.com/news/default.aspx
 31,Kroger,Consumer Staples,https://ir.kroger.com/News/
 32,Pepsi,Consumer Staples,https://www.pepsico.com/our-stories/press-releases
-33,Downy,Consumer Staples,https://downy.com/en-us/news
-34,Febreze,Consumer Staples,https://us.pg.com/newsroom/
-35,Crest,Consumer Staples,https://www.haleon.com/news/press-releases
+33,Procter & Gamble,Consumer Staples,https://news.pg.com/news-releases/default.aspx
+34,Crest,Consumer Staples,https://www.haleon.com/news/press-releases
+35,Pampers,Consumer Staples,https://us.pg.com/newsroom/
 36,Tampax,Consumer Staples,https://us.pg.com/newsroom/
-37,Procter & Gamble,Consumer Staples,https://news.pg.com/news-releases/default.aspx
-38,Pampers,Consumer Staples,https://us.pg.com/newsroom/
+37,Downy,Consumer Staples,https://downy.com/en-us/news
+38,Febreze,Consumer Staples,https://us.pg.com/newsroom/
 39,Gain,Consumer Staples,https://www.loreal.com/en/mediaroom/
 40,Publix,Consumer Staples,https://corporate.publix.com/newsroom/category/press-releases
 41,Sysco,Consumer Staples,https://www.sysco.com/latest-at-sysco
@@ -60,8 +60,8 @@
 58,Fannie Mae,Financials,https://www.fanniemae.com/newsroom
 59,Freddie Mac,Financials,https://www.freddiemac.com/media-room
 60,Goldman Sachs,Financials,https://www.goldmansachs.com/media-relations/press-releases-and-comments/current/
-61,JPMorgan Chase,Financials,https://www.jpmorganchase.com/ir/news
-62,First Republic Bank,Financials,https://www.jpmorganchase.com/newsroom
+61,First Republic Bank,Financials,https://www.jpmorganchase.com/newsroom
+62,JPMorgan Chase,Financials,https://www.jpmorganchase.com/ir/news
 63,MetLife,Financials,https://www.metlife.com/about-us/newsroom/
 64,Morgan Stanley,Financials,https://www.morganstanley.com/im/en-us/institutional-investor/about-us/newsroom.html
 65,Nationwide Insurance,Financials,https://news.nationwide.com/
@@ -98,8 +98,8 @@
 96,Broadcom,Information Technology,https://www.broadcom.com/company/news
 97,Cisco,Information Technology,https://newsroom.cisco.com/c/r/newsroom/en/us/press-room/press-releases.html
 98,Dell,Information Technology,https://www.dell.com/en-us/dt/corporate/newsroom.htm
-99,Red Hat,Information Technology,https://www.redhat.com/en/about/newsroom
-100,IBM,Information Technology,https://newsroom.ibm.com/
+99,IBM,Information Technology,https://newsroom.ibm.com/
+100,Red Hat,Information Technology,https://www.redhat.com/en/about/newsroom
 101,Ingram Micro,Information Technology,https://ir.ingrammicro.com/press-releases
 102,Intel,Information Technology,https://www.intel.com/content/www/us/en/newsroom/news-stories.html
 103,Microsoft,Information Technology,https://news.microsoft.com/category/press-releases/

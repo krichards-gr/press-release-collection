@@ -43,7 +43,7 @@ def collect_search_results(search_queries: List[str]) -> Optional[pd.DataFrame]:
     for query in search_queries:
         current_url = query  # Start with the initial query URL
         page_count = 0       # Track pagination depth
-        max_pages = 20       # Limit to prevent infinite pagination
+        max_pages = 2       # Limit to prevent infinite pagination
         print(f"Processing query: {query}")
 
         # Paginate through results until no more pages or max reached

@@ -122,16 +122,18 @@ for url in article_urls:
         "article_text": article_text
         })
 
+        print("**********************************************************")
+        print(f"Title: {title}")
+        print(f"URL: {url}")
+        print("**********************************************************")
+
     except NameError:
         print("Name error")
 
     except:
         print("Unable to retrieve content at:", url)
 
-    print("**********************************************************")
-    print(f"Title: {title}")
-    print(f"URL: {url}")
-    print("**********************************************************")
+
     
     time.sleep(0.5)
 
@@ -146,6 +148,7 @@ output_articles_deduped = output_articles.drop_duplicates(subset=['url'], keep='
 # Left join preserves all SERP results, adding scraped content where available
 joined = pd.merge(left=results_df, right=output_articles_deduped, how='left', on='url')
 
+joined.to_csv("outputs/joined.csv")
 # =============================================================================
 # SENTIMENT ANALYSIS SETUP
 # =============================================================================
