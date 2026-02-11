@@ -65,6 +65,12 @@ from tqdm import tqdm
 import spacy
 import asent
 
+# Alternative scrapers for fallback chain
+import cloudscraper  # Bypasses Cloudflare and other bot protection
+import trafilatura  # Robust content extraction
+from readability import Document  # Mozilla's readability algorithm
+from goose3 import Goose  # Alternative article extractor
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -92,6 +98,7 @@ class ScraperMetrics:
         self.successful = 0
         self.failed = 0
         self.error_counts = Counter()
+        self.scraper_counts = Counter()  # Track which scrapers succeeded
         self.failed_urls = []
         self.processing_times = []
         self.start_time = None
@@ -102,11 +109,12 @@ class ScraperMetrics:
             self.total = total
             self.start_time = time.time()
 
-    def record_success(self, processing_time: float):
+    def record_success(self, processing_time: float, scraper_used: str = "unknown"):
         """Record a successful scrape."""
         with self.lock:
             self.successful += 1
             self.processing_times.append(processing_time)
+            self.scraper_counts[scraper_used] += 1
 
     def record_failure(self, url: str, error_type: str, error_message: str):
         """Record a failed scrape with details."""
@@ -150,6 +158,13 @@ class ScraperMetrics:
                 f"   Throughput:               {self.total/elapsed_time:.2f} articles/sec",
             ]
 
+            # Show which scrapers succeeded
+            if self.scraper_counts:
+                report.append(f"\n🔧 SCRAPER PERFORMANCE:")
+                for scraper, count in self.scraper_counts.most_common():
+                    percentage = (count / self.successful * 100) if self.successful > 0 else 0
+                    report.append(f"   {scraper:.<30} {count:>4} ({percentage:>5.1f}%)")
+
             if self.error_counts:
                 report.append(f"\n❌ ERROR BREAKDOWN:")
                 for error_type, count in self.error_counts.most_common():
@@ -174,12 +189,152 @@ class ScraperMetrics:
         return False
 
 # =============================================================================
-# ARTICLE SCRAPING FUNCTIONS
+# INDIVIDUAL SCRAPER FUNCTIONS
+# =============================================================================
+# Each scraper attempts to extract article content using a different library.
+# They all return the same standardized format or None on failure.
+# This modular design makes it easy to add/remove scrapers from the chain.
+
+def scrape_with_newspaper(url: str, config: Config) -> Optional[Dict]:
+    """
+    Scraper #1: newspaper3k - Fast general-purpose scraper.
+
+    Pros: Fast, includes NLP for keywords/summary
+    Cons: Often blocked by bot protection, struggles with JS-heavy sites
+    """
+    try:
+        article = Article(url, config=config)
+        article.download()
+        article.parse()
+        article.nlp()
+
+        # Validate content
+        if not article.text or len(article.text.strip()) < 100:
+            return None
+
+        return {
+            "title": article.title,
+            "url": url,
+            "summary": article.summary,
+            "publish_date": article.publish_date,
+            "keywords": ", ".join(article.keywords) if article.keywords else "",
+            "article_text": article.text,
+            "scraper_used": "newspaper3k"
+        }
+    except:
+        return None
+
+
+def scrape_with_trafilatura(url: str) -> Optional[Dict]:
+    """
+    Scraper #2: trafilatura - Excellent at extracting main content.
+
+    Pros: Very robust, handles many layouts, bypasses some bot protection
+    Cons: No automatic keyword/summary generation
+    """
+    try:
+        # Use cloudscraper to bypass bot protection
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, timeout=TIMEOUT_SECONDS)
+
+        # Extract content with trafilatura
+        text = trafilatura.extract(response.text, include_comments=False)
+
+        if not text or len(text.strip()) < 100:
+            return None
+
+        # Extract metadata (title, date)
+        metadata = trafilatura.extract_metadata(response.text)
+
+        return {
+            "title": metadata.title if metadata and metadata.title else "",
+            "url": url,
+            "summary": "",  # trafilatura doesn't generate summaries
+            "publish_date": metadata.date if metadata and metadata.date else None,
+            "keywords": "",  # trafilatura doesn't extract keywords
+            "article_text": text,
+            "scraper_used": "trafilatura"
+        }
+    except:
+        return None
+
+
+def scrape_with_readability(url: str) -> Optional[Dict]:
+    """
+    Scraper #3: readability-lxml - Mozilla's readability algorithm.
+
+    Pros: Good at identifying main content, works on many layouts
+    Cons: Returns HTML (needs parsing), no metadata extraction
+    """
+    try:
+        # Use cloudscraper to bypass bot protection
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, timeout=TIMEOUT_SECONDS)
+
+        # Apply readability
+        doc = Document(response.text)
+
+        # Parse the cleaned HTML to extract text
+        soup = BeautifulSoup(doc.summary(), 'html.parser')
+        text = soup.get_text(separator='\n', strip=True)
+
+        if not text or len(text.strip()) < 100:
+            return None
+
+        return {
+            "title": doc.title(),
+            "url": url,
+            "summary": "",
+            "publish_date": None,
+            "keywords": "",
+            "article_text": text,
+            "scraper_used": "readability"
+        }
+    except:
+        return None
+
+
+def scrape_with_goose(url: str) -> Optional[Dict]:
+    """
+    Scraper #4: goose3 - Another robust article extractor.
+
+    Pros: Good content extraction, gets metadata
+    Cons: Can be slower, occasionally misidentifies content
+    """
+    try:
+        # Initialize goose with config
+        with Goose({'browser_user_agent': USER_AGENT}) as g:
+            article = g.extract(url=url)
+
+            if not article.cleaned_text or len(article.cleaned_text.strip()) < 100:
+                return None
+
+            return {
+                "title": article.title,
+                "url": url,
+                "summary": article.meta_description or "",
+                "publish_date": article.publish_date,
+                "keywords": ", ".join(article.tags) if article.tags else "",
+                "article_text": article.cleaned_text,
+                "scraper_used": "goose3"
+            }
+    except:
+        return None
+
+
+# =============================================================================
+# MAIN SCRAPING FUNCTION WITH FALLBACK CHAIN
 # =============================================================================
 
 def scrape_single_article(url: str, config: Config, metrics: ScraperMetrics) -> Optional[Dict]:
     """
-    Scrape a single article with comprehensive error handling and retry logic.
+    Try multiple scrapers in sequence until one succeeds.
+
+    Fallback Chain:
+    1. newspaper3k (fast, good NLP)
+    2. trafilatura (robust, bypasses bot protection)
+    3. readability (Mozilla algorithm)
+    4. goose3 (alternative robust option)
 
     Args:
         url: Article URL to scrape
@@ -187,93 +342,44 @@ def scrape_single_article(url: str, config: Config, metrics: ScraperMetrics) -> 
         metrics: Metrics tracker instance
 
     Returns:
-        Dictionary with article data if successful, None if failed
+        Dictionary with article data if successful, None if all scrapers fail
     """
     start_time = time.time()
 
-    for attempt in range(RETRY_ATTEMPTS):
+    # Define the fallback chain - order matters!
+    # We try fast scrapers first, then more robust ones
+    scrapers = [
+        ("newspaper3k", lambda: scrape_with_newspaper(url, config)),
+        ("trafilatura", lambda: scrape_with_trafilatura(url)),
+        ("readability", lambda: scrape_with_readability(url)),
+        ("goose3", lambda: scrape_with_goose(url))
+    ]
+
+    # Try each scraper in sequence
+    last_error = "All scrapers failed"
+    for scraper_name, scraper_func in scrapers:
         try:
-            # Initialize newspaper Article with browser user-agent config
-            article = Article(url, config=config)
+            result = scraper_func()
 
-            # Download HTML (with timeout handling)
-            article.download()
+            # Success! Record metrics and return
+            if result:
+                processing_time = time.time() - start_time
 
-            # Parse content
-            article.parse()
+                # Record which scraper succeeded (this helps us understand performance)
+                scraper_used = result.get('scraper_used', scraper_name)
+                metrics.record_success(processing_time, scraper_used)
 
-            # Run NLP pipeline (keywords and summary extraction)
-            article.nlp()
+                time.sleep(RATE_LIMIT_DELAY)  # Rate limiting
 
-            # Validate that we got meaningful content
-            if not article.text or len(article.text.strip()) < 100:
-                raise ValueError("Article text too short or empty")
-
-            # Record success
-            processing_time = time.time() - start_time
-            metrics.record_success(processing_time)
-
-            # Rate limiting
-            time.sleep(RATE_LIMIT_DELAY)
-
-            # Return structured data
-            return {
-                "title": article.title,
-                "url": url,
-                "summary": article.summary,
-                "publish_date": article.publish_date,
-                "keywords": ", ".join(article.keywords) if article.keywords else "",
-                "article_text": article.text
-            }
-
-        except ArticleException as e:
-            error_type = "Article Parsing Error"
-            error_msg = str(e)
-            # Don't retry ArticleException - usually means bad URL or paywall
-            break
-
-        except requests.exceptions.Timeout:
-            error_type = "Timeout Error"
-            error_msg = f"Request timed out after {TIMEOUT_SECONDS}s"
-            if attempt < RETRY_ATTEMPTS - 1:
-                time.sleep(1 * (attempt + 1))  # Exponential backoff
-                continue
-            break
-
-        except requests.exceptions.ConnectionError as e:
-            error_type = "Connection Error"
-            error_msg = str(e)
-            if attempt < RETRY_ATTEMPTS - 1:
-                time.sleep(1 * (attempt + 1))
-                continue
-            break
-
-        except requests.exceptions.HTTPError as e:
-            error_type = "HTTP Error"
-            error_msg = f"HTTP {e.response.status_code}" if hasattr(e, 'response') else str(e)
-            # Don't retry 4xx errors
-            if hasattr(e, 'response') and 400 <= e.response.status_code < 500:
-                break
-            if attempt < RETRY_ATTEMPTS - 1:
-                time.sleep(1 * (attempt + 1))
-                continue
-            break
-
-        except ValueError as e:
-            error_type = "Validation Error"
-            error_msg = str(e)
-            break
+                return result
 
         except Exception as e:
-            error_type = "Unknown Error"
-            error_msg = f"{type(e).__name__}: {str(e)}"
-            if attempt < RETRY_ATTEMPTS - 1:
-                time.sleep(1 * (attempt + 1))
-                continue
-            break
+            # This scraper failed, try the next one
+            last_error = f"{scraper_name} failed: {str(e)}"
+            continue
 
-    # If we get here, all retries failed
-    metrics.record_failure(url, error_type, error_msg)
+    # All scrapers failed - record the failure
+    metrics.record_failure(url, "All Scrapers Failed", last_error)
     return None
 
 
