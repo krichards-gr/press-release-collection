@@ -3,8 +3,8 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "🚀 Press Release Collection Pipeline - Deployment Script" -ForegroundColor Cyan
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "Press Release Collection Pipeline - Deployment Script" -ForegroundColor Cyan
+Write-Host "======================================================" -ForegroundColor Cyan
 
 # Configuration
 $PROJECT_ID = Read-Host "Enter your GCP Project ID"
@@ -30,15 +30,15 @@ if ($CONFIRM -ne "y") {
 }
 
 Write-Host ""
-Write-Host "📋 Step 1: Setting up GCP project..." -ForegroundColor Green
+Write-Host "Step 1: Setting up GCP project..." -ForegroundColor Green
 gcloud config set project $PROJECT_ID
 
 Write-Host ""
-Write-Host "📋 Step 2: Enabling required APIs..." -ForegroundColor Green
+Write-Host "Step 2: Enabling required APIs..." -ForegroundColor Green
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com bigquery.googleapis.com cloudscheduler.googleapis.com secretmanager.googleapis.com
 
 Write-Host ""
-Write-Host "📋 Step 3: Creating BigQuery dataset..." -ForegroundColor Green
+Write-Host "Step 3: Creating BigQuery dataset..." -ForegroundColor Green
 try {
     bq mk --dataset --location=US $DATASET 2>$null
 } catch {
@@ -46,7 +46,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "📋 Step 4: Storing Bright Data credentials in Secret Manager..." -ForegroundColor Green
+Write-Host "Step 4: Storing Bright Data credentials in Secret Manager..." -ForegroundColor Green
 try {
     $BRIGHT_DATA_URL | gcloud secrets create bright-data-proxy-url --data-file=- 2>$null
 } catch {
@@ -54,7 +54,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "📋 Step 5: Deploying to Cloud Run from GitHub..." -ForegroundColor Green
+Write-Host "Step 5: Deploying to Cloud Run from GitHub..." -ForegroundColor Green
 Write-Host "This may take 5-10 minutes for first deployment..." -ForegroundColor Yellow
 gcloud run deploy $SERVICE_NAME `
     --source=$GITHUB_REPO `
@@ -69,12 +69,12 @@ gcloud run deploy $SERVICE_NAME `
     --platform=managed
 
 Write-Host ""
-Write-Host "📋 Step 6: Getting service URL..." -ForegroundColor Green
+Write-Host "Step 6: Getting service URL..." -ForegroundColor Green
 $SERVICE_URL = gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)'
 Write-Host "Service URL: $SERVICE_URL" -ForegroundColor Cyan
 
 Write-Host ""
-Write-Host "📋 Step 7: Creating service account for Cloud Scheduler..." -ForegroundColor Green
+Write-Host "Step 7: Creating service account for Cloud Scheduler..." -ForegroundColor Green
 try {
     gcloud iam service-accounts create cloud-scheduler-invoker --display-name="Cloud Scheduler Invoker" 2>$null
 } catch {
@@ -87,7 +87,7 @@ gcloud run services add-iam-policy-binding $SERVICE_NAME `
     --role="roles/run.invoker"
 
 Write-Host ""
-Write-Host "📋 Step 8: Creating Cloud Scheduler jobs..." -ForegroundColor Green
+Write-Host "Step 8: Creating Cloud Scheduler jobs..." -ForegroundColor Green
 
 # Get date range for scheduler jobs (rolling 10-day window)
 $END_DATE = Get-Date -Format "yyyy-MM-dd"
@@ -144,8 +144,8 @@ try {
 }
 
 Write-Host ""
-Write-Host "✅ Deployment Complete!" -ForegroundColor Green
-Write-Host "=======================" -ForegroundColor Green
+Write-Host "Deployment Complete!" -ForegroundColor Green
+Write-Host "====================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Service URL: $SERVICE_URL" -ForegroundColor Cyan
 Write-Host ""
@@ -167,4 +167,4 @@ Write-Host ""
 Write-Host "4. Check BigQuery:"
 Write-Host "   bq query 'SELECT * FROM $DATASET.collection_runs ORDER BY start_timestamp DESC LIMIT 10'"
 Write-Host ""
-Write-Host "📚 For more details, see DEPLOY_FROM_GITHUB.md" -ForegroundColor Cyan
+Write-Host "For more details, see DEPLOY_FROM_GITHUB.md" -ForegroundColor Cyan
