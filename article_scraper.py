@@ -72,6 +72,7 @@ nltk.download('punkt_tab')
 
 from newspaper import Config       # Browser user-agent configuration
 import pandas as pd               # Data manipulation
+from tqdm import tqdm             # Progress bars
 import spacy                      # NLP pipeline
 import asent                      # Sentiment analysis for spaCy
 
@@ -80,8 +81,9 @@ import asent                      # Sentiment analysis for spaCy
 # =============================================================================
 
 # Load SERP results CSV containing article URLs to scrape
-results_df = pd.read_csv('outputs/initial_collected_results.csv')
-article_urls = results_df["link"].to_list()
+results_df = pd.read_csv('outputs/f100_collected_results.csv')
+results_df = results_df.rename(columns={"link": "url"})
+article_urls = results_df["url"].to_list()
 
 # Configure browser user-agent to avoid being blocked by websites
 # Some sites return 403 Forbidden without a valid user-agent
@@ -96,46 +98,45 @@ config.browser_user_agent = user_agent
 # Accumulator for scraped article data
 df_articles = []
 
-for url in article_urls:
-    try:
-        # Initialize newspaper Article with browser user-agent config
-        article = Article(url, config=config)
-        # Download HTML, parse content, and run NLP pipeline
-        article.download()   # Fetch article HTML
-        article.parse()      # Extract text, title, images, publish date
-        article.nlp()        # Generate keywords and summary
+for url in tqdm(article_urls, desc="Scraping Articles", unit="article"):
+    for url in article_urls:
+        try:
+            # Initialize newspaper Article with browser user-agent config
+            article = Article(url, config=config)
+            # Download HTML, parse content, and run NLP pipeline
+            article.download()   # Fetch article HTML
+            article.parse()      # Extract text, title, images, publish date
+            article.nlp()        # Generate keywords and summary
 
-        # Extract article metadata and content
-        title = article.title
-        summary = article.summary
-        publish_date = article.publish_date
-        keywords = article.keywords
-        article_text = article.text
-        # Note: newspaper can also extract: authors, top_image, movies, etc.
+            # Extract article metadata and content
+            title = article.title
+            summary = article.summary
+            publish_date = article.publish_date
+            keywords = article.keywords
+            article_text = article.text
+            # Note: newspaper can also extract: authors, top_image, movies, etc.
 
-        df_articles.append({
-        "title": title,
-        "url": url,
-        "summary": summary,
-        "publish_date": publish_date,
-        "keywords": ", " .join(keywords),
-        "article_text": article_text
-        })
+            df_articles.append({
+            "title": title,
+            "url": url,
+            "summary": summary,
+            "publish_date": publish_date,
+            "keywords": ", " .join(keywords),
+            "article_text": article_text
+            })
 
-        print("**********************************************************")
-        print(f"Title: {title}")
-        print(f"URL: {url}")
-        print("**********************************************************")
+            # print("**********************************************************")
+            # print(f"Title: {title}")
+            # print(f"URL: {url}")
+            # print("**********************************************************")
 
-    except NameError:
-        print("Name error")
+        except NameError:
+            print("Name error")
 
-    except:
-        print("Unable to retrieve content at:", url)
-
-
-    
-    time.sleep(0.5)
+        except Exception as e:
+            tqdm.write(f"Unable to retrieve content at: {url} | Error: {e}")
+        
+        time.sleep(0.5)
 
 
 # Convert list of dictionaries to DataFrame
@@ -148,7 +149,7 @@ output_articles_deduped = output_articles.drop_duplicates(subset=['url'], keep='
 # Left join preserves all SERP results, adding scraped content where available
 joined = pd.merge(left=results_df, right=output_articles_deduped, how='left', on='url')
 
-joined.to_csv("outputs/joined.csv")
+joined.to_csv("outputs/f100_joined.csv")
 # =============================================================================
 # SENTIMENT ANALYSIS SETUP
 # =============================================================================

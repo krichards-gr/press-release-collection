@@ -1605,6 +1605,7 @@ dependencies = [
     { name = "readability-lxml" },
     { name = "setuptools" },
     { name = "spacy" },
+    { name = "tqdm" },
     { name = "trafilatura" },
 ]
 
@@ -1626,6 +1627,7 @@ requires-dist = [
     { name = "readability-lxml", specifier = ">=0.8.4.1" },
     { name = "setuptools", specifier = ">=82.0.0" },
     { name = "spacy", specifier = ">=3.8.11" },
+    { name = "tqdm", specifier = ">=4.67.3" },
     { name = "trafilatura", specifier = ">=2.0.0" },
 ]
 

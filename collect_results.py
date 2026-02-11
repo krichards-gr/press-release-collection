@@ -54,8 +54,8 @@ def collect_search_results(search_queries: List[str]) -> Optional[pd.DataFrame]:
             response = requests.get(
                 current_url,
                 proxies={
-                    "http": "http://brd-customer-c_bb36cd52-zone-jj_coverage_monitor:y506tdfo2nlq@brd.superproxy.io:33335",
-                    "https": "http://brd-customer-c_bb36cd52-zone-jj_coverage_monitor:y506tdfo2nlq@brd.superproxy.io:33335",
+                    'http': 'http://brd-customer-hl_bb36cd52-zone-corporate_newsroom_collection:n7766z1i0zmm@brd.superproxy.io:33335',
+                    'https': 'http://brd-customer-hl_bb36cd52-zone-corporate_newsroom_collection:n7766z1i0zmm@brd.superproxy.io:33335'
                 },
                 verify=False,  # SSL verification disabled for proxy
             )

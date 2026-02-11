@@ -19,4 +19,4 @@ search_queries = create_search_queries(start_date=start_date, end_date=end_date)
 print(search_queries)
 results = collect_search_results(search_queries=search_queries)
 
-results.to_csv("outputs/initial_collected_results.csv")
+results.to_csv("outputs/f100_collected_results.csv")

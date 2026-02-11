@@ -21,5 +21,6 @@ dependencies = [
     "readability-lxml>=0.8.4.1",
     "setuptools>=82.0.0",
     "spacy>=3.8.11",
+    "tqdm>=4.67.3",
     "trafilatura>=2.0.0",
 ]
