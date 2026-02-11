@@ -20,13 +20,20 @@ env/
 *.swp
 *.swo
 
-# Outputs (can be regenerated)
+# Data files (CSVs stored in BigQuery instead)
+inputs/*.csv
 outputs/*.csv
 outputs/*.log
+outputs/*.txt
 outputs/checkpoints/
+*.csv
 
-# Keep output directory structure
+# Keep directory structure
+!inputs/.gitkeep
 !outputs/.gitkeep
+
+# Keep example/template files
+!.env.example
 
 # OS
 .DS_Store
