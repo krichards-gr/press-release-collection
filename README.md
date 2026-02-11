@@ -1,16 +1,16 @@
 # Corporate Press Release Collection Pipeline
 
-Automated end-to-end pipeline for collecting and analyzing corporate press releases from Fortune 100 company newsrooms.
+Automated end-to-end pipeline for collecting and analyzing corporate press releases from Fortune 100 company newsrooms. Designed for Google Cloud Run with BigQuery storage.
 
 ## 🚀 Features
 
-- **Complete Pipeline**: BigQuery → Query Generation → SERP Collection → Article Scraping → Sentiment Analysis
+- **Cloud-Native**: Deployed on Google Cloud Run with BigQuery storage
+- **HTTP API**: RESTful JSON endpoint for programmatic access
+- **Complete Pipeline**: Reference Data → SERP Collection → Article Scraping → Sentiment Analysis → BigQuery
 - **Multi-Scraper Fallback**: 4-tier scraper chain (newspaper3k → trafilatura → readability → goose3) for 90%+ success rate
-- **Smart Deduplication**: Track processed URLs to avoid redundant scraping
-- **Fault Tolerance**: Checkpoint system allows resuming from failures
-- **Incremental Processing**: Process only new articles since last run
-- **Configurable**: Centralized config with environment variable support
-- **Progress Tracking**: Real-time progress bars and comprehensive reports
+- **Scalable**: Stateless design, automatic scaling, containerized deployment
+- **Schedulable**: Cloud Scheduler integration for automated runs
+- **Production-Ready**: Comprehensive error handling, monitoring, and logging
 
 ## 📋 Requirements
 
@@ -66,47 +66,53 @@ All settings centralized in `config.py`:
 
 ## 🎯 Usage
 
-### Basic Usage
+### Cloud Run (Production)
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide.
+
+```bash
+# Deploy to Cloud Run
+gcloud run deploy press-release-collector \
+  --source . \
+  --region us-central1 \
+  --env-vars-file .env.yaml
+
+# Invoke via HTTP
+curl -X POST $SERVICE_URL \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2026-01-01",
+    "end_date": "2026-01-31"
+  }'
+```
+
+### CLI (Local/Testing)
 
 ```bash
 # Run complete pipeline with default dates
-python main.py
+python main_cli.py
 
 # Specify custom date range
-python main.py --start-date 2026-01-01 --end-date 2026-01-31
+python main_cli.py --start-date 2026-01-01 --end-date 2026-01-31
 
 # SERP collection only (skip article scraping)
-python main.py --skip-scraping
+python main_cli.py --skip-scraping
 ```
 
-### Incremental Processing
+### CLI-Only Features
 
 ```bash
 # Process only new articles since last run
-python main.py --incremental
+python main_cli.py --incremental
 
 # Process last 7 days
-python main.py --last-n-days 7
+python main_cli.py --last-n-days 7
 
-# Process last 30 days
-python main.py --last-n-days 30
-```
-
-### Fault Tolerance
-
-```bash
 # Resume from latest checkpoint
-python main.py --resume
+python main_cli.py --resume
 
-# Disable checkpointing
-python main.py --no-checkpoints
-```
-
-### Cache Management
-
-```bash
 # Force refresh of BigQuery reference data (bypass cache)
-python main.py --force-refresh
+python main_cli.py --force-refresh
 ```
 
 ## 📊 Pipeline Stages
@@ -143,39 +149,47 @@ python main.py --force-refresh
 - Categories: positive, negative, neutral
 - Applied to article descriptions
 
-## 📁 Output Files
+## 📁 Data Storage
+
+### BigQuery Tables (Primary Storage)
+
+```
+project.press_release_collection/
+├── serp_results          # Raw search results
+├── scraped_articles      # Full article content
+└── enriched_articles     # Final data with sentiment
+```
+
+All tables are partitioned by `collection_timestamp` for efficient querying.
+
+### Local Files (Backup/Debug)
 
 ```
 outputs/
-├── f100_collected_results.csv   # Raw SERP results
-├── f100_joined.csv               # Joined with scraped content
-├── enriched.csv                  # Final data with sentiment
-├── scraper_errors.csv            # Failed URLs with error details
-├── filtered_urls.csv             # Non-article URLs filtered out
-├── processed_urls.txt            # Deduplication tracking
-└── checkpoints/                  # Fault tolerance checkpoints
-    └── YYYYMMDD_HHMMSS/
-        ├── metadata.json
-        ├── reference_data.pkl
-        ├── reference_data.csv
-        └── serp_results.pkl
+├── f100_collected_results.csv   # SERP results backup
+├── f100_joined.csv               # Joined data backup
+├── enriched.csv                  # Enriched data backup
+├── scraper_errors.csv            # Failed URLs log
+└── filtered_urls.csv             # Non-article URLs filtered
 ```
 
 ## 🔧 Module Reference
 
 ### Core Modules
 
-- **`main.py`**: Pipeline orchestrator with CLI
+- **`main.py`**: Cloud Run HTTP endpoint (production)
+- **`main_cli.py`**: CLI orchestrator (local/testing)
 - **`config.py`**: Centralized configuration
-- **`grab_reference_data.py`**: BigQuery data fetching with caching
+- **`bigquery_storage.py`**: BigQuery table operations
+- **`grab_reference_data.py`**: Reference data fetching with caching
 - **`generate_queries.py`**: Search query generation
 - **`collect_results.py`**: SERP collection with retry logic
 - **`article_scraper.py`**: Multi-scraper content extraction
 
 ### Utility Modules
 
-- **`deduplication.py`**: URL tracking and deduplication
-- **`checkpointing.py`**: Fault tolerance and resume capability
+- **`deduplication.py`**: URL tracking (CLI only)
+- **`checkpointing.py`**: Fault tolerance (CLI only)
 
 ## 📈 Performance
 
