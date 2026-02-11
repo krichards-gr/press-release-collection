@@ -43,7 +43,7 @@ class Config:
     # =============================================================================
     BRIGHT_DATA_PROXY_URL = os.getenv(
         'BRIGHT_DATA_PROXY_URL',
-        'http://brd-customer-hl_bb36cd52-zone-corporate_newsroom_collection:n7766z1i0zmm@brd.superproxy.io:33335'
+        ''  # No default - require environment variable
     )
 
     # SERP collection settings
