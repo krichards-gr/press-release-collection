@@ -99,7 +99,7 @@ config.browser_user_agent = user_agent
 df_articles = []
 
 for url in tqdm(article_urls, desc="Scraping Articles", unit="article"):
-    for url in article_urls:
+    # for url in article_urls:
         try:
             # Initialize newspaper Article with browser user-agent config
             article = Article(url, config=config)
