@@ -82,9 +82,9 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     # Parse JSON response
                     try:
                         parsed = json.loads(response.text)
-                    except json.JSONDecodeError:
-                        # Fallback to SDK parser
-                        parsed = BrightDataClient.parse_content(response.text)
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ JSON decode error for query: {e}")
+                        parsed = {"organic": []}  # Empty result on parse error
 
                     # Check for organic results
                     if not parsed.get("organic"):

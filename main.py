@@ -50,12 +50,22 @@ def validate_request(request_json: Dict) -> tuple[bool, str, Dict]:
     Returns:
         (is_valid, error_message, validated_params)
     """
+    from datetime import datetime, timedelta
+
+    # Calculate dynamic dates if not provided
+    today = datetime.utcnow().date()
+    default_end_date = today.strftime('%Y-%m-%d')
+
+    # Default: collect last 10 days (safety buffer)
+    default_start_date = (today - timedelta(days=10)).strftime('%Y-%m-%d')
+
     # Default parameters
     params = {
-        'start_date': request_json.get('start_date', config.DEFAULT_START_DATE),
-        'end_date': request_json.get('end_date', config.DEFAULT_END_DATE),
+        'start_date': request_json.get('start_date', default_start_date),
+        'end_date': request_json.get('end_date', default_end_date),
         'force_refresh': request_json.get('force_refresh', False),
         'skip_scraping': request_json.get('skip_scraping', False),
+        'use_last_collection': request_json.get('use_last_collection', False),  # Optional smart mode
     }
 
     # Validate date format
