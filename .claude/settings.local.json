@@ -11,7 +11,14 @@
       "Bash(git commit:*)",
       "Bash(ls:*)",
       "Bash(git rm:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File fix_cloudrun_secret.ps1:*)",
+      "Bash(gcloud secrets versions add:*)",
+      "Bash(git push:*)",
+      "Bash(gcloud run deploy:*)",
+      "Bash(curl:*)",
+      "Bash(gcloud run services logs tail:*)",
+      "Bash(gcloud logging read:*)"
     ]
   }
 }
