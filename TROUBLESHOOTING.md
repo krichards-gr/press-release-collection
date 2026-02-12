@@ -221,9 +221,20 @@ To avoid these issues in the future:
 
 ## Recent Fixes
 
-**2026-02-12:**
+**2026-02-12 (CRITICAL SSL FIX):**
+- **Fixed SSL certificate verification error** that was blocking all SERP requests
+  - Root cause: Bright Data proxy uses self-signed certificate for SSL interception
+  - Error: `SSLError: certificate verify failed: self-signed certificate in certificate chain`
+  - Solution: Set `verify=False` in requests to allow proxy's self-signed cert
+  - Result: SERP collection now working successfully
 - Added proxy URL validation and debugging
 - Added query validation to skip empty URLs
-- Created `verify_proxy.py` diagnostic tool
+- Created `verify_proxy.py` and `test_brightdata.py` diagnostic tools
 - Updated Secret Manager with properly formatted proxy URL
 - Added detailed debug logging to SERP collection
+
+**Why verify=False is safe here:**
+- The SSL connection is from our code → Bright Data proxy → Google
+- Bright Data's proxy performs SSL interception (normal for SERP proxies)
+- The proxy re-encrypts traffic to Google with its own certificate
+- This is the intended behavior for Bright Data's SERP API
