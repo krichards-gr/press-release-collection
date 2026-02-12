@@ -78,7 +78,8 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
                     'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
                 },
-                timeout=10
+                timeout=10,
+                verify=False  # Disable SSL verification for proxy
             )
             print(f"DEBUG - Proxy test successful! Status code: {test_response.status_code}")
             print(f"DEBUG - Response length: {len(test_response.text)} bytes")
@@ -120,7 +121,7 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                             'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
                         },
                         timeout=config.SERP_TIMEOUT,
-                        verify=True  # SSL verification enabled for security
+                        verify=False  # Disable SSL verification for Bright Data proxy (uses self-signed cert)
                     )
                     response.raise_for_status()
 
