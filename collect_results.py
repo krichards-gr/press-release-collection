@@ -17,6 +17,7 @@ import pandas as pd
 from brightdata import BrightDataClient
 import requests
 import time
+from urllib.parse import urlparse
 from typing import List, Optional
 from tqdm import tqdm
 
@@ -41,6 +42,17 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
     """
     if max_pages is None:
         max_pages = config.MAX_SERP_PAGES
+
+    # Ensure Bright Data proxy is configured to avoid direct Google requests
+    if not config.BRIGHT_DATA_PROXY_URL_HTTP or not config.BRIGHT_DATA_PROXY_URL_HTTPS:
+        raise ValueError(
+            "Bright Data proxy URLs are not configured. "
+            "Set BRIGHT_DATA_PROXY_URL or BRIGHT_DATA_PROXY_URL_HTTP/HTTPS in the environment."
+        )
+    else:
+        http_host = urlparse(config.BRIGHT_DATA_PROXY_URL_HTTP).netloc
+        https_host = urlparse(config.BRIGHT_DATA_PROXY_URL_HTTPS).netloc
+        print(f"Using Bright Data proxy hosts: http={http_host}, https={https_host}")
 
     # Accumulator for all search results across queries and pages
     full_results = []
@@ -83,8 +95,18 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     try:
                         parsed = json.loads(response.text)
                     except json.JSONDecodeError as e:
-                        print(f"⚠️ JSON decode error for query: {e}")
-                        parsed = {"organic": []}  # Empty result on parse error
+                        content_type = response.headers.get("content-type", "unknown")
+                        body_snippet = (response.text or "")[:200].replace("\n", " ")
+                        resp_url = response.url if response is not None else "unknown"
+                        tqdm.write(
+                            f"⚠️ JSON decode error for query: {e} "
+                            f"(status={response.status_code}, content-type={content_type}, "
+                            f"url={resp_url}, request_url={current_url}, body='{body_snippet}')"
+                        )
+                        if attempt < config.SERP_RETRY_ATTEMPTS - 1:
+                            time.sleep(2 ** attempt)
+                            continue
+                        parsed = {"organic": []}  # Empty result on parse error after retries
 
                     # Check for organic results
                     if not parsed.get("organic"):
@@ -116,6 +138,18 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                         continue
                     else:
                         tqdm.write(f"⚠️  Timeout after {config.SERP_RETRY_ATTEMPTS} attempts: {current_url[:100]}...")
+                        break
+
+                except requests.exceptions.HTTPError as e:
+                    status_code = e.response.status_code if e.response is not None else None
+                    if status_code == 429 and attempt < config.SERP_RETRY_ATTEMPTS - 1:
+                        time.sleep(10 * (attempt + 1))
+                        continue
+                    if attempt < config.SERP_RETRY_ATTEMPTS - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    else:
+                        tqdm.write(f"⚠️  Request failed: {str(e)[:100]}")
                         break
 
                 except requests.exceptions.RequestException as e:

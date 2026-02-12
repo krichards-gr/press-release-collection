@@ -101,14 +101,21 @@ def run_serp_collection(start_date: str, end_date: str, force_refresh: bool, run
     stats['companies_count'] = len(reference_df)
 
     # Extract company identifiers for logging
-    companies = reference_df['Company'].tolist() if 'Company' in reference_df.columns else []
+    if 'corporation' in reference_df.columns:
+        companies = reference_df['corporation'].tolist()
+    elif 'Company' in reference_df.columns:
+        companies = reference_df['Company'].tolist()
+    else:
+        companies = []
 
     # Step 2: Check for new URLs needing backfill
     print(f"[{run_id}] Checking for new URLs needing backfill...")
 
     # Get all URLs from reference data (pressroom URLs are what we track)
     current_urls = []
-    if 'pressroom_url' in reference_df.columns:
+    if 'newsroom_url' in reference_df.columns:
+        current_urls = reference_df['newsroom_url'].dropna().tolist()
+    elif 'pressroom_url' in reference_df.columns:
         current_urls = reference_df['pressroom_url'].dropna().tolist()
 
     backfill_urls = storage.identify_urls_needing_backfill(
@@ -286,7 +293,12 @@ def press_release_collection(request: Request):
 
         # Log run start (get companies for tracking)
         reference_df = grab_reference_data(force_refresh=params['force_refresh'])
-        companies = reference_df['Company'].tolist() if 'Company' in reference_df.columns else []
+        if 'corporation' in reference_df.columns:
+            companies = reference_df['corporation'].tolist()
+        elif 'Company' in reference_df.columns:
+            companies = reference_df['Company'].tolist()
+        else:
+            companies = []
 
         storage.log_run_start(
             run_id=run_id,
