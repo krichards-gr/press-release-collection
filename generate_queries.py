@@ -28,18 +28,30 @@ def create_search_queries(start_date, end_date):
     # query_terms = pd.read_csv('inputs/company_information.csv')['query'].tolist()
 
     # Load media outlet domains to search within
-    pressroom_urls = pd.read_csv('inputs/reference_data.csv')['newsroom_url'].tolist()
-    
+    df = pd.read_csv('inputs/reference_data.csv')
+    pressroom_urls = df['newsroom_url'].dropna().tolist()  # Drop NaN values
+
+    print(f"📝 Loaded {len(pressroom_urls)} valid newsroom URLs from reference data")
+
     # for domain in outlet_domains:
     for url in pressroom_urls:
+        # Skip empty or invalid URLs
+        if not url or not isinstance(url, str) or url.strip() == '':
+            print(f"⚠️ Skipping invalid URL: {url}")
+            continue
+
+        url = url.strip()  # Remove any whitespace
+
         # URL-encode the query term to handle special characters
         # safe='' ensures all characters (spaces, &, ", etc.) are encoded
         # encoded_term = quote(term, safe='')
-        
+
         # Build the complete query
         query = f'https://www.google.com/search?q=site:{url}+before:{end_date}+after:{start_date}&gl=US&hl=en&brd_json=1'
         queries.append(query)
-    
+
+    print(f"✅ Generated {len(queries)} search queries")
+
     return queries
 
 # Usage

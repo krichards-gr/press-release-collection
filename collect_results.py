@@ -54,6 +54,21 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         https_host = urlparse(config.BRIGHT_DATA_PROXY_URL_HTTPS).netloc
         print(f"Using Bright Data proxy hosts: http={http_host}, https={https_host}")
 
+        # Debug: Show full proxy URLs (mask password for security)
+        def mask_password(url):
+            """Mask password in proxy URL for safe logging"""
+            if '@' in url:
+                creds, rest = url.split('@', 1)
+                if ':' in creds:
+                    protocol_user, password = creds.rsplit(':', 1)
+                    return f"{protocol_user}:***@{rest}"
+            return url
+
+        print(f"DEBUG - HTTP proxy: {mask_password(config.BRIGHT_DATA_PROXY_URL_HTTP)}")
+        print(f"DEBUG - HTTPS proxy: {mask_password(config.BRIGHT_DATA_PROXY_URL_HTTPS)}")
+        print(f"DEBUG - Proxy format check: HTTP starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTP.startswith('http://')}")
+        print(f"DEBUG - Proxy format check: HTTPS starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTPS.startswith('http://')}")
+
     # Accumulator for all search results across queries and pages
     full_results = []
     failed_queries = []
