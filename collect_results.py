@@ -69,6 +69,24 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         print(f"DEBUG - Proxy format check: HTTP starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTP.startswith('http://')}")
         print(f"DEBUG - Proxy format check: HTTPS starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTPS.startswith('http://')}")
 
+        # Test proxy connectivity
+        print(f"DEBUG - Testing proxy connectivity...")
+        try:
+            test_response = requests.get(
+                "https://www.google.com/search?q=test&brd_json=1",
+                proxies={
+                    'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
+                    'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
+                },
+                timeout=10
+            )
+            print(f"DEBUG - Proxy test successful! Status code: {test_response.status_code}")
+            print(f"DEBUG - Response length: {len(test_response.text)} bytes")
+            print(f"DEBUG - Response headers: {dict(test_response.headers)}")
+        except Exception as test_error:
+            print(f"⚠️  WARNING - Proxy test failed: {type(test_error).__name__}: {str(test_error)[:500]}")
+            print(f"    This may indicate proxy connectivity issues")
+
     # Accumulator for all search results across queries and pages
     full_results = []
     failed_queries = []
@@ -164,7 +182,9 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                         time.sleep(2 ** attempt)
                         continue
                     else:
-                        tqdm.write(f"⚠️  Request failed: {str(e)[:100]}")
+                        tqdm.write(f"⚠️  HTTP Error: {str(e)[:300]}")
+                        if e.response is not None:
+                            tqdm.write(f"    Response body: {e.response.text[:500]}")
                         break
 
                 except requests.exceptions.RequestException as e:
@@ -172,7 +192,10 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                         time.sleep(2 ** attempt)
                         continue
                     else:
-                        tqdm.write(f"⚠️  Request failed: {str(e)[:100]}")
+                        error_msg = str(e)
+                        tqdm.write(f"⚠️  Request failed: {error_msg[:300]}")
+                        tqdm.write(f"    Error type: {type(e).__name__}")
+                        tqdm.write(f"    Query URL: {current_url[:200]}")
                         break
 
                 except Exception as e:
