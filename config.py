@@ -59,7 +59,7 @@ class Config:
         BRIGHT_DATA_PROXY_URL_HTTPS = BRIGHT_DATA_PROXY_URL
 
     # SERP collection settings
-    MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '10'))  # Increased from 2
+    MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '2'))  # Increased from 2
     SERP_RETRY_ATTEMPTS = int(os.getenv('SERP_RETRY_ATTEMPTS', '3'))
     SERP_TIMEOUT = int(os.getenv('SERP_TIMEOUT', '30'))
 
