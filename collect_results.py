@@ -121,15 +121,30 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         current_url = query
         page_count = 0
         query_results = []
+        query_timed_out = False
+        query_start_time = time.time()
 
         tqdm.write(f"\n→ Collecting: {query}")
 
         # Paginate through results
         while current_url and page_count < max_pages:
+            # Check total elapsed time for this query before attempting another page
+            elapsed = time.time() - query_start_time
+            if elapsed > config.SERP_QUERY_TIMEOUT:
+                tqdm.write(f"⏱  Query timed out ({elapsed:.0f}s > {config.SERP_QUERY_TIMEOUT}s), skipping: {query[:100]}...")
+                query_timed_out = True
+                break
+
             success = False
 
             # Retry logic for transient failures
             for attempt in range(config.SERP_RETRY_ATTEMPTS):
+                # Also check before each retry attempt
+                if time.time() - query_start_time > config.SERP_QUERY_TIMEOUT:
+                    elapsed = time.time() - query_start_time
+                    tqdm.write(f"⏱  Query timed out ({elapsed:.0f}s > {config.SERP_QUERY_TIMEOUT}s), skipping: {query[:100]}...")
+                    query_timed_out = True
+                    break
                 try:
                     # Send request through Bright Data SERP proxy
                     response = requests.get(
@@ -221,9 +236,15 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     tqdm.write(f"⚠️  Unexpected error: {str(e)[:100]}")
                     break
 
+            if query_timed_out:
+                break  # Exit the pagination while loop
+
             if not success and page_count == 0:
                 # Failed to get even the first page
-                failed_queries.append(query)
+                failed_queries.append({"query": query, "reason": "request_failed"})
+
+        if query_timed_out and page_count == 0:
+            failed_queries.append({"query": query, "reason": "timed_out"})
 
         # Add this query's results to the full collection
         if query_results:
@@ -240,13 +261,20 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
 
     pbar.close()
 
-    # Report on failed queries
+    # Report and save failed queries
     if failed_queries:
         print(f"\n⚠️  {len(failed_queries)} queries failed completely:")
         for fq in failed_queries[:5]:  # Show first 5
-            print(f"   - {fq[:100]}...")
+            print(f"   - [{fq['reason']}] {fq['query'][:100]}...")
         if len(failed_queries) > 5:
             print(f"   ... and {len(failed_queries) - 5} more")
+
+        # Append to the failed queries log for later retry via alternative API
+        failed_df = pd.DataFrame(failed_queries)
+        failed_path = config.SERP_FAILED_QUERIES_FILE
+        write_header = not failed_path.exists()
+        failed_df.to_csv(failed_path, mode='a', index=False, header=write_header)
+        print(f"   Saved to {failed_path}")
 
     # Combine all results into final dataframe
     if full_results:

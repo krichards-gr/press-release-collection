@@ -62,6 +62,7 @@ class Config:
     MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '2'))  # Increased from 2
     SERP_RETRY_ATTEMPTS = int(os.getenv('SERP_RETRY_ATTEMPTS', '3'))
     SERP_TIMEOUT = int(os.getenv('SERP_TIMEOUT', '30'))
+    SERP_QUERY_TIMEOUT = int(os.getenv('SERP_QUERY_TIMEOUT', '20'))  # Max total seconds per query before skipping
 
     # =============================================================================
     # ARTICLE SCRAPER
@@ -87,6 +88,7 @@ class Config:
     ENRICHED_RESULTS_FILE = OUTPUTS_DIR / "enriched.csv"
     SCRAPER_ERRORS_FILE = OUTPUTS_DIR / "scraper_errors.csv"
     FILTERED_URLS_FILE = OUTPUTS_DIR / "filtered_urls.csv"
+    SERP_FAILED_QUERIES_FILE = OUTPUTS_DIR / "serp_failed_queries.csv"
 
     # Checkpointing
     CHECKPOINT_DIR = OUTPUTS_DIR / "checkpoints"

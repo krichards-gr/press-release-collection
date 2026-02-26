@@ -24,7 +24,8 @@
       "Bash(git -C \"/c/Users/KRosh/To_Backup/Tools/press-release-collection\" ls-files --others --cached --exclude-standard)",
       "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" ls-files:*)",
       "Bash(python3:*)",
-      "Bash(cmd /c:*)"
+      "Bash(cmd /c:*)",
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" log --name-only --pretty=format:\"\" HEAD~5..HEAD)"
     ]
   }
 }
