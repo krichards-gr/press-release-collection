@@ -20,7 +20,11 @@
       "Bash(gcloud run services logs tail:*)",
       "Bash(gcloud logging read:*)",
       "Bash(wc:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(git -C \"/c/Users/KRosh/To_Backup/Tools/press-release-collection\" ls-files --others --cached --exclude-standard)",
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" ls-files:*)",
+      "Bash(python3:*)",
+      "Bash(cmd /c:*)"
     ]
   }
 }
