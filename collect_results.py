@@ -16,6 +16,8 @@ import json
 import pandas as pd
 from brightdata import BrightDataClient
 import requests
+import requests.packages.urllib3
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 import time
 from urllib.parse import urlparse
 from typing import List, Optional
@@ -105,6 +107,8 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         current_url = query
         page_count = 0
         query_results = []
+
+        tqdm.write(f"\n→ Collecting: {query}")
 
         # Paginate through results
         while current_url and page_count < max_pages:
