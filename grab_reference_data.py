@@ -25,6 +25,7 @@ QUERY = """
     FROM `sri-benchmarking-databases.social_media_activity_archive.benchmarking_corporate_reference`
     WHERE F100 IS TRUE
     AND newsroom_url IS NOT NULL
+    ORDER BY corporation
 """
 
 
