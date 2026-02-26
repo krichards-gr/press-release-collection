@@ -25,7 +25,11 @@
       "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" ls-files:*)",
       "Bash(python3:*)",
       "Bash(cmd /c:*)",
-      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" log --name-only --pretty=format:\"\" HEAD~5..HEAD)"
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" log --name-only --pretty=format:\"\" HEAD~5..HEAD)",
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" status)",
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" diff --stat)",
+      "Bash(git -C \"C:/Users/KRosh/To_Backup/Tools/press-release-collection\" add README.md article_scraper.py bigquery_storage.py collect_results.py config.py docs/BIGQUERY_SCHEMA.md docs/CHANGELOG.md generate_queries.py)",
+      "Bash(git -C:*)"
     ]
   }
 }
