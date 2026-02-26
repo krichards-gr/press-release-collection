@@ -289,19 +289,24 @@ class BigQueryStorage:
         """
         table_id = self._get_table_ref("collection_runs")
 
-        # Get queries from runs that overlap with the requested date range
-        # A run overlaps if: run.start_date <= end_date AND run.end_date >= start_date
+        # Get queries from runs that overlap with the requested date range.
+        # A run overlaps if: run.start_date <= end_date AND run.end_date >= start_date.
+        #
+        # The table is partitioned by start_timestamp, so we include a start_timestamp
+        # filter to enable partition pruning and avoid a full table scan. We look back
+        # 90 days as a safe upper bound — no legitimate run would be older than that.
         query = f"""
             SELECT DISTINCT query
             FROM `{table_id}`,
             UNNEST(queries_executed) AS query
             WHERE status = 'completed'
+              AND start_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
               AND start_date <= DATE('{end_date}')
               AND end_date >= DATE('{start_date}')
         """
 
         try:
-            results = self.client.query(query).result()
+            results = self.client.query(query).result(timeout=60)
             queries = {row.query for row in results}
             print(f"📝 Found {len(queries):,} queries already executed for overlapping date ranges")
             return queries
