@@ -93,7 +93,7 @@ def run_serp_collection(start_date: str, end_date: str, force_refresh: bool, run
 
     # Step 1: Get reference data
     print(f"[{run_id}] Fetching reference data...")
-    reference_df = grab_reference_data(force_refresh=force_refresh)
+    reference_df = grab_reference_data()
 
     if reference_df.empty:
         raise ValueError("No reference data available")
@@ -292,7 +292,7 @@ def press_release_collection(request: Request):
         storage.initialize_tables()
 
         # Log run start (get companies for tracking)
-        reference_df = grab_reference_data(force_refresh=params['force_refresh'])
+        reference_df = grab_reference_data()
         if 'corporation' in reference_df.columns:
             companies = reference_df['corporation'].tolist()
         elif 'Company' in reference_df.columns:

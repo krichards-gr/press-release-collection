@@ -81,7 +81,6 @@ class Config:
     # DATA FILES
     # =============================================================================
     REFERENCE_DATA_FILE = INPUTS_DIR / "reference_data.csv"
-    REFERENCE_DATA_CACHE_HOURS = int(os.getenv('REFERENCE_DATA_CACHE_HOURS', '24'))
 
     COLLECTED_RESULTS_FILE = OUTPUTS_DIR / "f100_collected_results.csv"
     JOINED_RESULTS_FILE = OUTPUTS_DIR / "f100_joined.csv"

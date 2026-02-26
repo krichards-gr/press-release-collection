@@ -55,7 +55,6 @@ BRIGHT_DATA_PROXY_URL=http://brd-customer-xxx-zone-xxx:password@brd.superproxy.i
 MAX_SERP_PAGES=2
 SERP_QUERY_TIMEOUT=20         # Seconds before a hanging query is skipped
 SCRAPER_MAX_WORKERS=10
-REFERENCE_DATA_CACHE_HOURS=24
 ```
 
 ### Configuration File (config.py)
@@ -138,9 +137,8 @@ python main_cli.py --force-refresh
 ## 📊 Pipeline Stages
 
 ### 1. Reference Data Collection (`grab_reference_data.py`)
-- Fetches Fortune 100 companies from BigQuery
-- Intelligent caching (24-hour default)
-- Fallback to expired cache if BigQuery unavailable
+- Always fetches Fortune 100 companies live from BigQuery (single source of truth)
+- Saves a local copy to `inputs/reference_data.csv` for downstream use and debugging
 
 ### 2. Query Generation (`generate_queries.py`)
 - Creates Google search queries for each newsroom URL

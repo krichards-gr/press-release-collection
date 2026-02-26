@@ -192,23 +192,15 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         # =====================================================================
         # STEP 1: Fetch Company Reference Data
         # =====================================================================
-        if checkpoint_manager and checkpoint_manager.has_checkpoint('reference_data'):
-            print("📊 STEP 1: Loading Reference Data from Checkpoint")
-            print("-" * 80)
-            reference_df = checkpoint_manager.load_checkpoint('reference_data')
-            print(f"✓ Loaded {len(reference_df):,} companies from checkpoint\n")
-        else:
-            print("📊 STEP 1: Fetching Company Reference Data")
-            print("-" * 80)
-            reference_df = grab_reference_data(force_refresh=force_refresh)
+        print("📊 STEP 1: Fetching Company Reference Data")
+        print("-" * 80)
+        reference_df = grab_reference_data()
 
-            if reference_df.empty:
-                print("❌ No reference data found. Exiting.")
-                sys.exit(1)
+        if reference_df.empty:
+            print("❌ No reference data found. Exiting.")
+            sys.exit(1)
 
-            if checkpoint_manager:
-                checkpoint_manager.save_checkpoint('reference_data', reference_df, "F100 company reference data")
-            print()
+        print()
 
         # =====================================================================
         # STEP 2: Generate Search Queries
