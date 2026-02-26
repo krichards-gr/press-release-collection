@@ -6,7 +6,7 @@ from urllib.parse import quote  # URL encoding for query parameters
 
 # Function to generate list of queries from two inputs (outlet urls and company name queries)
 # def create_search_queries(query_terms, outlet_domains, start_date, end_date):
-def create_search_queries(start_date, end_date):
+def create_search_queries(start_date, end_date, limit=None):
     """
     Generate search queries combining individual company terms with domains and date ranges.
     
@@ -29,6 +29,9 @@ def create_search_queries(start_date, end_date):
 
     # Load media outlet domains to search within
     df = pd.read_csv('inputs/reference_data.csv')
+    if limit is not None:
+        df = df.head(limit)
+        print(f"⚠️  Limit applied: using first {len(df)} companies for query generation")
     pressroom_urls = df['newsroom_url'].dropna().tolist()  # Drop NaN values
 
     print(f"📝 Loaded {len(pressroom_urls)} valid newsroom URLs from reference data")

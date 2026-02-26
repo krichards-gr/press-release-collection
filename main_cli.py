@@ -89,6 +89,13 @@ def parse_arguments():
         help='Process articles from the last N days (shortcut for incremental)'
     )
 
+    parser.add_argument(
+        '--limit',
+        type=int,
+        metavar='N',
+        help='Only process the first N companies from the input data (useful for local testing)'
+    )
+
     return parser.parse_args()
 
 
@@ -142,7 +149,8 @@ def validate_dates(start_date: str, end_date: str) -> tuple[str, str]:
 
 
 def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
-                  skip_scraping: bool = False, resume: bool = False, use_checkpoints: bool = True):
+                  skip_scraping: bool = False, resume: bool = False, use_checkpoints: bool = True,
+                  limit: int = None):
     """
     Execute the complete press release collection pipeline.
 
@@ -153,6 +161,7 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         skip_scraping: Skip article scraping step
         resume: Resume from latest checkpoint
         use_checkpoints: Enable checkpointing
+        limit: Only process the first N companies (for local testing)
     """
     # Initialize checkpoint manager
     checkpoint_manager = None
@@ -207,10 +216,10 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         print("🔍 STEP 2: Generating Search Queries")
         print("-" * 80)
 
-        # Save reference data for query generation
+        # Save full reference data (preserves cache for subsequent runs)
         reference_df.to_csv(config.REFERENCE_DATA_FILE, index=False)
 
-        search_queries = create_search_queries(start_date=start_date, end_date=end_date)
+        search_queries = create_search_queries(start_date=start_date, end_date=end_date, limit=limit)
         print(f"✓ Generated {len(search_queries):,} search queries")
         print()
 
@@ -343,5 +352,6 @@ if __name__ == "__main__":
         force_refresh=args.force_refresh,
         skip_scraping=args.skip_scraping,
         resume=args.resume,
-        use_checkpoints=not args.no_checkpoints
+        use_checkpoints=not args.no_checkpoints,
+        limit=args.limit
     )
