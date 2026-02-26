@@ -18,7 +18,9 @@
       "Bash(gcloud run deploy:*)",
       "Bash(curl:*)",
       "Bash(gcloud run services logs tail:*)",
-      "Bash(gcloud logging read:*)"
+      "Bash(gcloud logging read:*)",
+      "Bash(wc:*)",
+      "Bash(dir:*)"
     ]
   }
 }
