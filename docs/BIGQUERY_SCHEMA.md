@@ -18,7 +18,7 @@ This dataset contains press release collection data with a 3-table design:
 | Column | Type | Mode | Description |
 |--------|------|------|-------------|
 | `url` | STRING | REQUIRED | Article URL (primary key) |
-| `title` | STRING | NULLABLE | Article title from SERP |
+| `title` | STRING | NULLABLE | Article title — scraped page title when available, otherwise SERP title (SERP titles are often truncated) |
 | `description` | STRING | NULLABLE | Meta description from SERP |
 | `rank` | INTEGER | NULLABLE | Search result rank position |
 | `query` | STRING | NULLABLE | Search query that found this article |

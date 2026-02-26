@@ -3,18 +3,20 @@ SERP Results Collection Module
 ================================
 
 Collects search engine results from Google via Bright Data SERP API.
-Handles pagination, retries, and error recovery.
+Handles pagination, retries, error recovery, and per-query timeouts.
 
 Features:
-- Configurable pagination depth (default: 10 pages)
+- Configurable pagination depth (default: 2 pages)
+- Per-query wall-clock timeout (SERP_QUERY_TIMEOUT, default: 20s) — skips
+  queries that hang without interrupting active pagination
 - Automatic retry logic for transient failures
 - Progress tracking with tqdm
-- Comprehensive error logging
+- Failed queries logged to outputs/serp_failed_queries.csv with failure reason
+  (reason: "timed_out" or "request_failed") for later retry via alternative API
 """
 
 import json
 import pandas as pd
-from brightdata import BrightDataClient
 import requests
 import requests.packages.urllib3
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)

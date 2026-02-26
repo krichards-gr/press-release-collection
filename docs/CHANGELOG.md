@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-02-26 - Scraped Title Replaces Truncated SERP Title
+
+### Problem
+SERP API titles are frequently truncated (ending with "..."), degrading data quality in BigQuery and downstream analysis.
+
+### Solution
+All four scraper functions now capture the full page title as `scraped_title`. After merging SERP and scraped data, the pipeline overwrites the SERP `title` with `scraped_title` wherever the scraper returned a non-empty value. URLs that fail to scrape retain their original SERP title unchanged.
+
+### Scraper Changes
+Each scraper function now returns a `scraped_title` field:
+- `scrape_with_newspaper()` → `article.title`
+- `scrape_with_trafilatura()` → `metadata.title`
+- `scrape_with_readability()` → `doc.title()`
+- `scrape_with_goose()` → `article.title`
+
+### Schema Impact
+No schema changes. The `title` column in `collected_articles` now contains a higher-quality value. The `scraped_title` helper column is dropped before writing to CSV or BigQuery.
+
+### Files Modified
+- `article_scraper.py` — scrapers return `scraped_title`; merge logic overwrites SERP title
+- `bigquery_storage.py` — updated `title` field description
+- `docs/BIGQUERY_SCHEMA.md` — updated `title` column description
+
+---
+
+## 2026-02-26 - Per-Query Hang Timeout & Failed Queries Log
+
+### Problem
+SERP queries that hang (no response from the proxy) block the pipeline indefinitely, wasting time without making progress.
+
+### Solution
+Added a **per-query wall-clock timeout** (`SERP_QUERY_TIMEOUT`, default: 20s). The timer starts when a query begins. Before each page fetch and before each retry attempt, elapsed time is checked:
+- If under 20s → continue as normal (pagination is never interrupted)
+- If over 20s → skip the query and record it as `timed_out`
+
+Queries that fail for any reason (timeout or exhausted retries) are **appended** to `outputs/serp_failed_queries.csv` with a `reason` column (`timed_out` or `request_failed`), ready for retry via an alternative API with stronger site-unlocking capabilities.
+
+### New Config Settings
+```python
+SERP_QUERY_TIMEOUT = int(os.getenv('SERP_QUERY_TIMEOUT', '20'))  # seconds
+SERP_FAILED_QUERIES_FILE = OUTPUTS_DIR / "serp_failed_queries.csv"
+```
+
+### Output Schema (`serp_failed_queries.csv`)
+| Column | Description |
+|--------|-------------|
+| `query` | Full SERP query URL that failed |
+| `reason` | `timed_out` or `request_failed` |
+
+### Files Modified
+- `collect_results.py` — query timer, timeout check, failed queries log
+- `config.py` — `SERP_QUERY_TIMEOUT`, `SERP_FAILED_QUERIES_FILE`
+- `README.md` — documented new env var and output file
+
+---
+
 ## 2026-02-11 - Query-Level Deduplication (SERP API Cost Optimization)
 
 ### Overview

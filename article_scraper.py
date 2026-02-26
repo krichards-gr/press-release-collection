@@ -11,7 +11,8 @@ Workflow:
 2. Downloads and parses each article using multi-scraper fallback chain (with concurrent processing)
 3. Applies NLP to extract keywords and generate summaries
 4. Performs sentiment analysis using spaCy + asent
-5. Joins scraped content with original SERP metadata (SERP title/description take precedence)
+5. Joins scraped content with original SERP metadata; scraped title replaces
+   the SERP title where available (SERP titles are often truncated)
 6. Outputs enriched article data and detailed execution report
 
 Input Required:
@@ -527,7 +528,7 @@ def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS,
 
     # Save error log if there were failures
     if metrics.failed > 0:
-        metrics.save_error_log('outputs/scraper_errors.csv')
+        metrics.save_error_log(str(config.SCRAPER_ERRORS_FILE))
 
     return articles
 
@@ -542,7 +543,8 @@ if __name__ == "__main__":
 
     # Load SERP results CSV containing article URLs to scrape
     print("📂 Loading SERP results...")
-    results_df = pd.read_csv('outputs/f100_collected_results.csv')
+    from config import config
+    results_df = pd.read_csv(config.COLLECTED_RESULTS_FILE)
     results_df = results_df.rename(columns={"link": "url"})
     all_urls = results_df["url"].to_list()
     print(f"   Found {len(all_urls):,} URLs from SERP results")
@@ -566,8 +568,8 @@ if __name__ == "__main__":
 
         # Save filtered URLs for review
         filtered_df = pd.DataFrame({'url': filtered_urls_list, 'reason': 'Non-article URL (pagination/index/home page)'})
-        filtered_df.to_csv('outputs/filtered_urls.csv', index=False)
-        print(f"   📝 Filtered URLs saved to outputs/filtered_urls.csv\n")
+        filtered_df.to_csv(config.FILTERED_URLS_FILE, index=False)
+        print(f"   📝 Filtered URLs saved to {config.FILTERED_URLS_FILE}\n")
     else:
         print(f"   ✓ All {len(article_urls):,} URLs appear to be articles\n")
 
@@ -592,8 +594,8 @@ if __name__ == "__main__":
             joined.loc[has_scraped_title, 'title'] = joined.loc[has_scraped_title, 'scraped_title']
             joined = joined.drop(columns=['scraped_title'])
 
-        joined.to_csv("outputs/f100_joined.csv", index=False)
-        print(f"   ✓ Saved joined data to outputs/f100_joined.csv")
+        joined.to_csv(config.JOINED_RESULTS_FILE, index=False)
+        print(f"   ✓ Saved joined data to {config.JOINED_RESULTS_FILE}")
     else:
         print("   ⚠ No articles successfully scraped!")
         joined = results_df
@@ -647,8 +649,8 @@ if __name__ == "__main__":
     joined['sentiment'] = joined['description'].progress_apply(get_sentiment_label)
 
     # Write enriched data to CSV
-    joined.to_csv("outputs/enriched.csv", index=False)
-    print(f"   ✓ Saved enriched data to outputs/enriched.csv")
+    joined.to_csv(config.ENRICHED_RESULTS_FILE, index=False)
+    print(f"   ✓ Saved enriched data to {config.ENRICHED_RESULTS_FILE}")
 
     print("\n✅ Article scraping complete!")
     print("="*80 + "\n")

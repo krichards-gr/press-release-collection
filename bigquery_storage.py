@@ -68,7 +68,7 @@ class BigQueryStorage:
         schema = [
             # SERP fields
             bigquery.SchemaField("url", "STRING", mode="REQUIRED", description="Article URL (primary key)"),
-            bigquery.SchemaField("title", "STRING", mode="NULLABLE", description="Article title from SERP"),
+            bigquery.SchemaField("title", "STRING", mode="NULLABLE", description="Article title (scraped page title when available, otherwise SERP title)"),
             bigquery.SchemaField("description", "STRING", mode="NULLABLE", description="Meta description from SERP"),
             bigquery.SchemaField("rank", "INTEGER", mode="NULLABLE", description="Search result rank position"),
             bigquery.SchemaField("query", "STRING", mode="NULLABLE", description="Search query that found this article"),
@@ -400,6 +400,7 @@ class BigQueryStorage:
         This combines SERP metadata with scraped article content.
         Expected DataFrame columns:
         - SERP: url, title, description, rank, query
+          (title will already be the scraped page title where available)
         - Scraped: article_text, summary, keywords, publish_date, scraper_used
 
         Args:
