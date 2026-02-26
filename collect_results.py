@@ -71,24 +71,38 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
         print(f"DEBUG - Proxy format check: HTTP starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTP.startswith('http://')}")
         print(f"DEBUG - Proxy format check: HTTPS starts with 'http://'? {config.BRIGHT_DATA_PROXY_URL_HTTPS.startswith('http://')}")
 
-        # Test proxy connectivity
+        # Test proxy connectivity (with retries)
         print(f"DEBUG - Testing proxy connectivity...")
-        try:
-            test_response = requests.get(
-                "https://www.google.com/search?q=test&brd_json=1",
-                proxies={
-                    'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
-                    'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
-                },
-                timeout=10,
-                verify=False  # Disable SSL verification for proxy
+        proxy_test_attempts = 3
+        proxy_ok = False
+        for attempt in range(proxy_test_attempts):
+            try:
+                test_response = requests.get(
+                    "https://www.google.com/search?q=test&brd_json=1",
+                    proxies={
+                        'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
+                        'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
+                    },
+                    timeout=20,
+                    verify=False
+                )
+                print(f"DEBUG - Proxy test successful! Status code: {test_response.status_code}")
+                print(f"DEBUG - Response length: {len(test_response.text)} bytes")
+                proxy_ok = True
+                break
+            except Exception as test_error:
+                wait = 2 ** attempt
+                print(f"⚠️  Proxy test attempt {attempt + 1}/{proxy_test_attempts} failed: "
+                      f"{type(test_error).__name__}: {str(test_error)[:200]}")
+                if attempt < proxy_test_attempts - 1:
+                    print(f"    Retrying in {wait}s...")
+                    time.sleep(wait)
+
+        if not proxy_ok:
+            raise RuntimeError(
+                "Proxy connectivity test failed after all retries. "
+                "Check your Bright Data credentials and network connection before retrying."
             )
-            print(f"DEBUG - Proxy test successful! Status code: {test_response.status_code}")
-            print(f"DEBUG - Response length: {len(test_response.text)} bytes")
-            print(f"DEBUG - Response headers: {dict(test_response.headers)}")
-        except Exception as test_error:
-            print(f"⚠️  WARNING - Proxy test failed: {type(test_error).__name__}: {str(test_error)[:500]}")
-            print(f"    This may indicate proxy connectivity issues")
 
     # Accumulator for all search results across queries and pages
     full_results = []
