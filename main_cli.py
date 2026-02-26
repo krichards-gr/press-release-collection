@@ -244,16 +244,20 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
                 checkpoint_manager.save_checkpoint('serp_results', results_df, "Raw SERP results")
 
         # Deduplicate against previously processed URLs
-        print("\n🔄 Deduplicating Results")
-        print("-" * 80)
         tracker = URLTracker()
-        original_count = len(results_df)
-        results_df = deduplicate_serp_results(results_df, tracker)
+        if force_refresh:
+            print("\n🔄 Skipping Deduplication (--force-refresh)")
+            print("-" * 80)
+        else:
+            print("\n🔄 Deduplicating Results")
+            print("-" * 80)
+            original_count = len(results_df)
+            results_df = deduplicate_serp_results(results_df, tracker)
 
-        if len(results_df) == 0:
-            print("⚠️  All URLs have been processed before. No new articles to scrape.")
-            print("   Use --force-refresh to reprocess all URLs")
-            sys.exit(0)
+            if len(results_df) == 0:
+                print("⚠️  All URLs have been processed before. No new articles to scrape.")
+                print("   Use --force-refresh to reprocess all URLs")
+                sys.exit(0)
 
         # Save SERP results
         results_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
