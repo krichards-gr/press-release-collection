@@ -290,6 +290,7 @@ def scrape_with_newspaper(url: str, config: Config) -> Optional[Dict]:
 
         return {
             "url": url,
+            "scraped_title": article.title or "",
             "summary": article.summary,
             "publish_date": article.publish_date,
             "keywords": ", ".join(article.keywords) if article.keywords else "",
@@ -323,6 +324,7 @@ def scrape_with_trafilatura(url: str) -> Optional[Dict]:
 
         return {
             "url": url,
+            "scraped_title": (metadata.title if metadata and metadata.title else "") or "",
             "summary": "",  # trafilatura doesn't generate summaries
             "publish_date": metadata.date if metadata and metadata.date else None,
             "keywords": "",  # trafilatura doesn't extract keywords
@@ -357,6 +359,7 @@ def scrape_with_readability(url: str) -> Optional[Dict]:
 
         return {
             "url": url,
+            "scraped_title": doc.title() or "",
             "summary": "",
             "publish_date": None,
             "keywords": "",
@@ -384,6 +387,7 @@ def scrape_with_goose(url: str) -> Optional[Dict]:
 
             return {
                 "url": url,
+                "scraped_title": article.title or "",
                 "summary": article.meta_description or "",
                 "publish_date": article.publish_date,
                 "keywords": ", ".join(article.tags) if article.tags else "",
@@ -579,9 +583,15 @@ if __name__ == "__main__":
         print(f"   Removed {len(output_articles) - len(output_articles_deduped)} duplicate entries")
 
         # Merge scraped content back with original SERP data
-        # Note: Scrapers return only content fields (article_text, summary, keywords, etc.)
-        # Title and description come from SERP data to avoid duplicate columns
         joined = pd.merge(left=results_df, right=output_articles_deduped, how='left', on='url')
+
+        # Replace SERP title with scraped title where the scraper returned a non-empty value
+        # (SERP titles are often truncated with "...")
+        if 'scraped_title' in joined.columns:
+            has_scraped_title = joined['scraped_title'].notna() & (joined['scraped_title'].str.strip() != '')
+            joined.loc[has_scraped_title, 'title'] = joined.loc[has_scraped_title, 'scraped_title']
+            joined = joined.drop(columns=['scraped_title'])
+
         joined.to_csv("outputs/f100_joined.csv", index=False)
         print(f"   ✓ Saved joined data to outputs/f100_joined.csv")
     else:
