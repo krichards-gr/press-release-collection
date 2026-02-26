@@ -38,3 +38,6 @@ outputs/checkpoints/
 # OS
 .DS_Store
 Thumbs.db
+outputs/f100_collected_results.csv
+outputs/f100_joined.csv
+outputs/enriched.csv
