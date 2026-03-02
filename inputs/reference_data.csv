@@ -16,8 +16,8 @@ Google,Communications Services,https://www.googlecloudpresscorner.com/
 Youtube,Communications Services,https://blog.youtube/news-and-events/
 McKesson,Healthcare,https://www.mckesson.com/about-mckesson/newsroom/press-releases/
 Cencora,Healthcare,https://www.cencora.com/newsroom
-First Republic Bank,Financials,https://www.jpmorganchase.com/newsroom
 JPMorgan Chase,Financials,https://www.jpmorganchase.com/ir/news
+First Republic Bank,Financials,https://www.jpmorganchase.com/newsroom
 Costco,Consumer Staples,https://investor.costco.com/news/default.aspx
 Cigna/Express Scripts,Healthcare,https://newsroom.cigna.com/latest-press-releases
 Xbox,Consumer Discretionary,https://news.xbox.com/en-us/?xr=footnav
@@ -37,8 +37,8 @@ Nvidia,Information Technology,https://nvidianews.nvidia.com/
 Goldman Sachs,Financials,https://www.goldmansachs.com/media-relations/press-releases-and-comments/current/
 Wells Fargo,Financials,https://newsroom.wf.com/English/home/default.aspx
 Valero Energy,Energy,https://www.valero.com/about/news-room
-Comcast,Communications Services,https://corporate.comcast.com/press
 NBC Universal,Communications Services,https://www.nbcuniversal.com/newsroom
+Comcast,Communications Services,https://corporate.comcast.com/press
 AT&T,Communications Services,https://about.att.com/story/
 Freddie Mac,Financials,https://www.freddiemac.com/media-room
 Humana,Healthcare,https://news.humana.com/press-room/press-releases
@@ -50,26 +50,26 @@ Pepsi,Consumer Staples,https://www.pepsico.com/our-stories/press-releases
 UPS,Industrials,https://about.ups.com/us/en/newsroom.html
 Johnson & Johnson/Janssen,Healthcare,https://www.jnj.com/media-center/press-releases
 FedEx,Industrials,https://newsroom.fedex.com/
-Gain,Consumer Staples,https://www.loreal.com/en/mediaroom/
-Bounty,Consumer Discretionary,https://us.pg.com/newsroom/
-Secret,Consumer Discretionary,https://us.pg.com/newsroom/
-Pantene,Consumer Discretionary,https://us.pg.com/newsroom/
-Old Spice,Consumer Discretionary,https://news.pg.com/news-releases/news-details/2023/Old-Spice-Delivers-Smelf-Confidence-Under-the-Spotlight-with-New-Musical-Inspired-Campaign/default.aspx
-Tide,Consumer Discretionary,https://us.pg.com/newsroom/
-Tampax,Consumer Staples,https://us.pg.com/newsroom/
-Procter & Gamble,Consumer Staples,https://news.pg.com/news-releases/default.aspx
-Febreze,Consumer Staples,https://us.pg.com/newsroom/
-Gillette,Consumer Discretionary,https://us.pg.com/newsroom/
 Pampers,Consumer Staples,https://us.pg.com/newsroom/
+Bounty,Consumer Discretionary,https://us.pg.com/newsroom/
+Pantene,Consumer Discretionary,https://us.pg.com/newsroom/
+Olay,Consumer Discretionary,https://us.pg.com/newsroom/
+Tide,Consumer Discretionary,https://us.pg.com/newsroom/
+Bounce,Consumer Discretionary,https://us.pg.com/newsroom/
+Febreze,Consumer Staples,https://us.pg.com/newsroom/
+Gain,Consumer Staples,https://www.loreal.com/en/mediaroom/
+Procter & Gamble,Consumer Staples,https://news.pg.com/news-releases/default.aspx
+Vick's,Consumer Discretionary,https://us.pg.com/newsroom/
 Downy,Consumer Staples,https://downy.com/en-us/news
 Crest,Consumer Staples,https://www.haleon.com/news/press-releases
-Bounce,Consumer Discretionary,https://us.pg.com/newsroom/
-Vick's,Consumer Discretionary,https://us.pg.com/newsroom/
-Olay,Consumer Discretionary,https://us.pg.com/newsroom/
+Tampax,Consumer Staples,https://us.pg.com/newsroom/
+Secret,Consumer Discretionary,https://us.pg.com/newsroom/
+Old Spice,Consumer Discretionary,https://news.pg.com/news-releases/news-details/2023/Old-Spice-Delivers-Smelf-Confidence-Under-the-Spotlight-with-New-Musical-Inspired-Campaign/default.aspx
+Gillette,Consumer Discretionary,https://us.pg.com/newsroom/
 Lowe's,Consumer Discretionary,https://corporate.lowes.com/newsroom/press-releases
 Energy Transfer,Energy,https://www.energytransfer.com/newsroom/
-RTX,Industrials,https://www.rtx.com/news
 Raytheon,Industrials,https://www.rtx.com/news
+RTX,Industrials,https://www.rtx.com/news
 Albertsons,Consumer Staples,https://www.albertsonscompanies.com/newsroom/press-releases/news-details/
 Sysco,Consumer Staples,https://www.sysco.com/latest-at-sysco
 American Express,Financials,https://www.americanexpress.com/en-us/newsroom/articles/
@@ -82,15 +82,15 @@ Caterpillar,Industrials,https://www.caterpillar.com/en/news/caterpillarNews.html
 Merck,Healthcare,https://www.merck.com/media/news/
 AllState,Financials,https://www.allstatenewsroom.com/news/
 Pfizer,Healthcare,https://www.pfizer.com/newsroom
-IBM,Information Technology,https://newsroom.ibm.com/
 Red Hat,Information Technology,https://www.redhat.com/en/about/newsroom
+IBM,Information Technology,https://newsroom.ibm.com/
 New York Life,Financials,https://www.newyorklife.com/newsroom/press-resources/press-releases
 Publix,Consumer Staples,https://corporate.publix.com/newsroom/category/press-releases
 Nationwide Insurance,Financials,https://news.nationwide.com/
 TD Synnex,Information Technology,https://ir.synnex.com/news/synnex-press-releases/default.aspx
 ConocoPhillips,Energy,https://www.conocophillips.com/news-media/
-AbbVie,Healthcare,https://news.abbvie.com/
 ImmunoGen,Healthcare,https://news.abbvie.com/?utm_medium=cpc&utm_campaign=ppp_2025&utm_source=google&utm_content=igp&utm_term=news&cid=ppc_CV10a9beddc8ce4454a3a2d463a0e9d5a2&gclsrc=aw.ds&gad_source=1&gad_campaignid=19901728071&gbraid=0AAAAAChQZNzWxNBwAgwxy6IgwVQLKuaox&gclid=Cj0KCQjwzt_FBhCEARIsAJGFWVnBdSK7HFdV6Q2qLtKzK_ummmB7EfhNVgqZwxrk453TaKf9PsGrCLYaAkLOEALw_wcB
+AbbVie,Healthcare,https://news.abbvie.com/
 Enterprise Products Partners,Energy,https://ir.enterpriseproducts.com/press-releases
 Charter Communications/Spectrum,Communications Services,https://corporate.charter.com/newsroom
 Capital One,Financials,https://www.capitalone.com/about/newsroom/
