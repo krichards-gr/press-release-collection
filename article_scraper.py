@@ -46,6 +46,7 @@ Author: KRosh
 # =============================================================================
 # IMPORTS
 # =============================================================================
+import os
 import requests
 from bs4 import BeautifulSoup
 from newspaper import Article, Config, ArticleException
@@ -399,6 +400,65 @@ def scrape_with_goose(url: str) -> Optional[Dict]:
         return None
 
 
+def scrape_with_bright_data_unlocker(url: str) -> Optional[Dict]:
+    """
+    Scraper #5: Bright Data Unlocker API - Premium fallback for bot-protected sites.
+
+    Uses Bright Data's Unlocker API to bypass advanced bot protection that defeats
+    all free scrapers. Only invoked when all free options fail, since it incurs cost.
+
+    Requires: BRIGHT_DATA_UNLOCKER_API_KEY environment variable.
+    If the key is not set, this scraper silently returns None.
+
+    Pros: Bypasses sophisticated bot protection (Cloudflare, Akamai, Imperva, etc.)
+    Cons: Costs money per request
+    """
+    api_key = os.getenv('BRIGHT_DATA_UNLOCKER_API_KEY', '').strip()
+    if not api_key:
+        return None
+
+    try:
+        response = requests.post(
+            "https://api.brightdata.com/request",
+            json={
+                "zone": "corporate_newsroom_unlocker",
+                "url": url,
+                "format": "raw",
+                "method": "GET",
+                "direct": True
+            },
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            timeout=TIMEOUT_SECONDS
+        )
+        response.raise_for_status()
+
+        html = response.text
+        if not html:
+            return None
+
+        # Extract content with trafilatura (accepts raw HTML directly)
+        text = trafilatura.extract(html, include_comments=False)
+        if not text or len(text.strip()) < 100:
+            return None
+
+        metadata = trafilatura.extract_metadata(html)
+
+        return {
+            "url": url,
+            "scraped_title": (metadata.title if metadata and metadata.title else "") or "",
+            "summary": "",
+            "publish_date": metadata.date if metadata and metadata.date else None,
+            "keywords": "",
+            "article_text": text,
+            "scraper_used": "bright_data_unlocker"
+        }
+    except:
+        return None
+
+
 # =============================================================================
 # MAIN SCRAPING FUNCTION WITH FALLBACK CHAIN
 # =============================================================================
@@ -412,6 +472,7 @@ def scrape_single_article(url: str, config: Config, metrics: ScraperMetrics) -> 
     2. trafilatura (robust, bypasses bot protection)
     3. readability (Mozilla algorithm)
     4. goose3 (alternative robust option)
+    5. bright_data_unlocker (premium API, only if BRIGHT_DATA_UNLOCKER_API_KEY is set)
 
     Args:
         url: Article URL to scrape
@@ -429,7 +490,8 @@ def scrape_single_article(url: str, config: Config, metrics: ScraperMetrics) -> 
         ("newspaper3k", lambda: scrape_with_newspaper(url, config)),
         ("trafilatura", lambda: scrape_with_trafilatura(url)),
         ("readability", lambda: scrape_with_readability(url)),
-        ("goose3", lambda: scrape_with_goose(url))
+        ("goose3", lambda: scrape_with_goose(url)),
+        ("bright_data_unlocker", lambda: scrape_with_bright_data_unlocker(url))
     ]
 
     # Try each scraper in sequence

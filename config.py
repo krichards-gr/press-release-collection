@@ -64,6 +64,9 @@ class Config:
     SERP_TIMEOUT = int(os.getenv('SERP_TIMEOUT', '30'))
     SERP_QUERY_TIMEOUT = int(os.getenv('SERP_QUERY_TIMEOUT', '20'))  # Max total seconds per query before skipping
 
+    # Bright Data Unlocker API (premium fallback scraper for bot-protected sites)
+    BRIGHT_DATA_UNLOCKER_API_KEY = os.getenv('BRIGHT_DATA_UNLOCKER_API_KEY', '').strip()
+
     # =============================================================================
     # ARTICLE SCRAPER
     # =============================================================================
