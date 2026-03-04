@@ -83,41 +83,16 @@ gcloud run services add-iam-policy-binding $SERVICE_NAME \
     --role="roles/run.invoker"
 
 echo ""
-echo "📋 Step 8: Creating Cloud Scheduler jobs..."
+echo "📋 Step 8: Creating Cloud Scheduler job..."
+read -p "Enter cron schedule (e.g. '0 5 * * *' for 5 AM UTC daily): " CRON_SCHEDULE
 
-# Midnight EST (5 AM UTC)
-echo "Creating midnight job..."
-gcloud scheduler jobs create http press-release-midnight \
+gcloud scheduler jobs create http press-release-collector \
     --location=$REGION \
-    --schedule="0 5 * * *" \
+    --schedule="$CRON_SCHEDULE" \
     --uri="$SERVICE_URL" \
     --http-method=POST \
     --headers="Content-Type=application/json" \
-    --message-body='{"start_date": "2026-02-01", "end_date": "2026-02-11"}' \
-    --oidc-service-account-email="cloud-scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com" \
-    --oidc-token-audience="$SERVICE_URL" 2>/dev/null || echo "Job already exists"
-
-# Noon EST (5 PM UTC)
-echo "Creating noon job..."
-gcloud scheduler jobs create http press-release-noon \
-    --location=$REGION \
-    --schedule="0 17 * * *" \
-    --uri="$SERVICE_URL" \
-    --http-method=POST \
-    --headers="Content-Type=application/json" \
-    --message-body='{"start_date": "2026-02-01", "end_date": "2026-02-11"}' \
-    --oidc-service-account-email="cloud-scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com" \
-    --oidc-token-audience="$SERVICE_URL" 2>/dev/null || echo "Job already exists"
-
-# 4 PM EST (9 PM UTC)
-echo "Creating 4pm job..."
-gcloud scheduler jobs create http press-release-4pm \
-    --location=$REGION \
-    --schedule="0 21 * * *" \
-    --uri="$SERVICE_URL" \
-    --http-method=POST \
-    --headers="Content-Type=application/json" \
-    --message-body='{"start_date": "2026-02-01", "end_date": "2026-02-11"}' \
+    --message-body='{}' \
     --oidc-service-account-email="cloud-scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com" \
     --oidc-token-audience="$SERVICE_URL" 2>/dev/null || echo "Job already exists"
 
@@ -127,17 +102,15 @@ echo "======================="
 echo ""
 echo "Service URL: $SERVICE_URL"
 echo ""
-echo "Scheduler Jobs:"
-echo "  - press-release-midnight (5 AM UTC / Midnight EST)"
-echo "  - press-release-noon (5 PM UTC / Noon EST)"
-echo "  - press-release-4pm (9 PM UTC / 4 PM EST)"
+echo "Scheduler Job:"
+echo "  - press-release-collector ($CRON_SCHEDULE)"
 echo ""
 echo "Next Steps:"
 echo "1. Test the deployment:"
 echo "   curl -X POST $SERVICE_URL -H 'Content-Type: application/json' -d '{\"start_date\": \"2026-02-10\", \"end_date\": \"2026-02-11\", \"skip_scraping\": true}'"
 echo ""
 echo "2. Test a scheduler job:"
-echo "   gcloud scheduler jobs run press-release-midnight --location=$REGION"
+echo "   gcloud scheduler jobs run press-release-collector --location=$REGION"
 echo ""
 echo "3. View logs:"
 echo "   gcloud run services logs tail $SERVICE_NAME --region=$REGION"
