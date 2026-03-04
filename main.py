@@ -250,8 +250,11 @@ def run_serp_collection(
     # ------------------------------------------------------------------
     # Step 6: Collect SERP results
     # ------------------------------------------------------------------
-    print(f"[{run_id}] Collecting SERP results for {len(queries_to_execute):,} queries...")
-    serp_df = collect_search_results(search_queries=queries_to_execute)
+    is_backfill = effective_start_date != start_date
+    max_pages = 10 if is_backfill else config.MAX_SERP_PAGES
+    print(f"[{run_id}] Collecting SERP results for {len(queries_to_execute):,} queries "
+          f"(max_pages={max_pages}{'  [backfill]' if is_backfill else ''})...")
+    serp_df = collect_search_results(search_queries=queries_to_execute, max_pages=max_pages)
 
     if serp_df is None or serp_df.empty:
         print(f"[{run_id}] No SERP results returned")
