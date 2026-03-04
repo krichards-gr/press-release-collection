@@ -101,12 +101,27 @@ def parse_arguments():
 
 def find_last_run_date() -> str:
     """
-    Find the end date from the most recent pipeline run.
+    Find the end date from the most recent successful pipeline run.
+
+    Checks in order:
+        1. BigQuery collection_runs table (authoritative — covers Cloud Run runs)
+        2. Local checkpoint metadata (fallback for CLI-only workflows)
 
     Returns:
-        Date string in YYYY-MM-DD format, or None if no previous run found
+        Date string in YYYY-MM-DD format, or None if no previous run found.
     """
-    # Check checkpoint metadata
+    # 1. Try BigQuery first (reflects Cloud Run daily runs as well as local runs)
+    try:
+        from bigquery_storage import BigQueryStorage
+        storage = BigQueryStorage()
+        last_date = storage.get_last_successful_run_end_date()
+        if last_date:
+            print(f"📅 Incremental start from BigQuery last run: {last_date}")
+            return last_date
+    except Exception:
+        pass  # Fall through to checkpoint approach
+
+    # 2. Fall back to local checkpoint metadata
     from checkpointing import find_latest_run
     latest_run = find_latest_run()
 
@@ -119,10 +134,11 @@ def find_last_run_date() -> str:
                 with open(metadata_file, 'r') as f:
                     metadata = json.load(f)
 
-                # Look for end_date in metadata
                 if 'pipeline_info' in metadata and 'end_date' in metadata['pipeline_info']:
-                    return metadata['pipeline_info']['end_date']
-            except:
+                    last_date = metadata['pipeline_info']['end_date']
+                    print(f"📅 Incremental start from checkpoint: {last_date}")
+                    return last_date
+            except Exception:
                 pass
 
     return None

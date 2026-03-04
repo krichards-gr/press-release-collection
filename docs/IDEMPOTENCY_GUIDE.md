@@ -1,341 +1,265 @@
-# Idempotency & Backfill Guide
+# Idempotency & Daily Scheduling Guide
 
-## Quick Reference
+## Overview
 
-### What is Idempotency?
+The pipeline uses **three layers of deduplication** (checked in cheapest-first order)
+to ensure it is safe to run on any schedule, will never double-charge for SERP API
+calls, and will never insert duplicate rows into BigQuery.
 
-**Problem**: Running the same date range multiple times wastes money on SERP API calls and creates duplicate BigQuery data.
-**Solution**: Pipeline checks what queries have been executed and skips them BEFORE hitting the SERP API.
-**Result**:
-- ✅ Safe to re-run (no duplicates)
-- 💰 Zero SERP API costs on re-runs
-- 💰 Zero BigQuery storage costs on re-runs
-
-### What is Automatic Backfill?
-
-**Problem**: Adding a new company means manually collecting historical data from 2026-01-01.
-**Solution**: Pipeline detects new URLs and automatically backfills from 2026-01-01.
-**Result**: Add company → run pipeline → complete historical data automatically.
+| Layer | What it checks | When it fires | Cost saved |
+|-------|---------------|---------------|------------|
+| 1. Auto start_date | Last completed run's `end_date` from `collection_runs` | Every run with no explicit date | BigQuery query cost |
+| 2. Query-level dedup | Exact SERP query strings executed in past runs | Before any SERP API call | SERP API credits |
+| 3. URL-level dedup | `press_release_id` (MD5 url) already in `press_release_metadata` | After SERP returns results | Scraping cost + BQ storage |
 
 ---
 
-## How It Works
+## Daily Scheduling (No Parameters)
 
-### 1. Normal Run (No New Companies)
+Send an empty POST to trigger a fully automatic daily run:
 
-**Request**:
-```json
-{
-  "start_date": "2026-02-01",
-  "end_date": "2026-02-07"
-}
+```bash
+curl -X POST $SERVICE_URL
 ```
 
-**What Happens**:
-1. ✅ Check for new URLs → None found
-2. ✅ Generate 100 queries for 2026-02-01 to 2026-02-07
-3. 💰 **Check already-executed queries** → All 100 executed previously
-4. 💰 **Skip SERP API entirely** (0 queries, $0 cost)
-5. ✅ Log completion (nothing to collect)
+**What happens internally**:
+1. Query `collection_runs` → find last completed run's `end_date`
+2. Set `start_date = last_end_date` (1-day overlap keeps safety buffer)
+3. Set `end_date = today`
+4. Run normally with dedup layers 2 & 3
 
-**Response**:
-```json
-{
-  "status": "success",
-  "stats": {
-    "backfill_urls_count": 0,
-    "queries_generated": 100,
-    "queries_skipped": 100,
-    "queries_executed": 0,
-    "serp_results_count": 0,
-    "articles_scraped": 0
-  }
-}
+**First-ever run** (no history in `collection_runs`):
+- Falls back to `start_date = today - 7 days`
+
+**Example timeline**:
 ```
-
-**Cost Impact**: Second run = $0 (no SERP API calls, no scraping)
-
-### 2. Run with New Company Added
-
-**Scenario**: You add "NewCorp Inc" to reference data
-**Request**:
-```json
-{
-  "start_date": "2026-02-01",
-  "end_date": "2026-02-07"
-}
+Run 1 (2026-03-01): start=2026-02-22, end=2026-03-01  → collects 7 days
+Run 2 (2026-03-02): start=2026-03-01, end=2026-03-02  → collects new day
+Run 3 (2026-03-03): start=2026-03-02, end=2026-03-03  → collects new day
+...
 ```
-
-**What Happens**:
-1. ✅ Check for new URLs → Found 1 new (NewCorp)
-2. 🔄 **Extend date range: 2026-01-01 to 2026-02-07** (backfill!)
-3. ✅ Generate 138 queries:
-   - NewCorp: 38 queries (2026-01-01 to 2026-02-07)
-   - Existing 100 companies: 100 queries (2026-02-01 to 2026-02-07)
-4. 💰 **Check already-executed queries** → 100 already executed
-5. 💰 **Skip 100 queries, execute 38** (only NewCorp queries)
-6. ✅ Collect SERP results for NewCorp only
-7. ✅ Scrape NewCorp's articles (historical + recent)
-8. ✅ Write to BigQuery
-
-**Response**:
-```json
-{
-  "status": "success",
-  "stats": {
-    "backfill_urls_count": 1,
-    "queries_generated": 138,
-    "queries_skipped": 100,
-    "queries_executed": 38,
-    "serp_results_count": 50,
-    "articles_scraped": 50
-  }
-}
-```
-
-**Cost Impact**: Only pay SERP API costs for NewCorp (38 queries), existing companies free
-
-### 3. Force Refresh (Bypass Deduplication)
-
-**Use Case**: Content has changed, need to re-scrape
-**Request**:
-```json
-{
-  "start_date": "2026-02-01",
-  "end_date": "2026-02-07",
-  "force_refresh": true
-}
-```
-
-**What Happens**:
-1. ⚠️  Skip deduplication check
-2. ✅ Collect all SERP results
-3. ✅ Scrape all URLs (including already-collected ones)
-4. ⚠️  Write to BigQuery (creates duplicates!)
-
-**Warning**: This creates duplicate records. Use sparingly.
 
 ---
 
-## BigQuery Tables
+## Deduplication Layers In Detail
 
-### collection_runs
+### Layer 1: Auto start_date (date range detection)
 
-**Purpose**: Track pipeline executions
-
-**Query Recent Runs**:
+BigQuery query in `get_last_successful_run_end_date()`:
 ```sql
-SELECT
-  run_id,
-  start_date,
-  end_date,
-  status,
-  urls_collected,
-  articles_scraped,
-  TIMESTAMP_DIFF(end_timestamp, start_timestamp, SECOND) as duration_sec
-FROM `pressure_monitoring.collection_runs`
-ORDER BY start_timestamp DESC
-LIMIT 10;
-```
-
-**Check Idempotency**:
-```sql
--- How many times have we collected 2026-02-01 to 2026-02-07?
-SELECT COUNT(*) as runs
+SELECT FORMAT_DATE('%Y-%m-%d', end_date) AS end_date_str
 FROM `pressure_monitoring.collection_runs`
 WHERE status = 'completed'
-  AND start_date = '2026-02-01'
-  AND end_date = '2026-02-07';
+  AND end_timestamp IS NOT NULL
+ORDER BY end_timestamp DESC
+LIMIT 1
 ```
 
-### collected_articles
+The result becomes `start_date` for the new run. This means the next run always
+picks up exactly where the last one left off (with a 1-day overlap for safety).
 
-**Check Duplicates** (should be zero):
+### Layer 2: Query-level deduplication (SERP API cost savings)
+
+Before executing any SERP queries, the pipeline checks which exact query strings
+were already executed for overlapping date ranges:
+
 ```sql
-SELECT url, COUNT(*) as duplicate_count
-FROM `pressure_monitoring.collected_articles`
-GROUP BY url
-HAVING COUNT(*) > 1;
+SELECT DISTINCT query
+FROM `pressure_monitoring.collection_runs`,
+UNNEST(queries_executed) AS query
+WHERE status = 'completed'
+  AND start_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+  AND start_date <= DATE('{end_date}')
+  AND end_date >= DATE('{start_date}')
 ```
 
-**Backfill Coverage**:
-```sql
--- For a specific company, what date range do we have?
-SELECT
-  MIN(DATE(publish_date)) as earliest_article,
-  MAX(DATE(publish_date)) as latest_article,
-  COUNT(*) as total_articles
-FROM `pressure_monitoring.collected_articles`
-WHERE query LIKE '%NewCorp%'
-  AND article_text IS NOT NULL;
+Any query in this set is skipped — zero SERP API calls for it.
+
+**Saves money when**: re-running the same date range, or when layer 1
+auto-detects a start_date that partially overlaps a previous run.
+
+### Layer 3: URL-level deduplication (prevents duplicate BQ rows)
+
+After SERP results come in, each URL is hashed: `press_release_id = MD5(url)`.
+The pipeline loads all existing IDs from BigQuery and filters them out:
+
+```python
+existing_ids = storage.get_existing_press_release_ids()
+# SELECT press_release_id FROM press_release_metadata
+
+serp_df = serp_df[~serp_df['press_release_id'].isin(existing_ids)]
 ```
+
+This is the final safety net — even if a URL appears in results from a new
+query, it won't be scraped or stored again.
 
 ---
 
-## Cost Implications
+## Scenarios
 
-### Before Idempotency
+### Scenario 1: Normal daily run
 
-**Scenario**: Run same date range 5 times
-**Cost**: 5x BigQuery storage + 5x scraping
+```bash
+# Cloud Scheduler fires at 2 AM with no body
+curl -X POST $SERVICE_URL
+```
 
-### After Idempotency
+Timeline for a run on 2026-03-04:
+1. Auto-detect: last run ended 2026-03-03 → `start=2026-03-03, end=2026-03-04`
+2. Generate 100 queries for 2026-03-03 → 2026-03-04
+3. Query dedup: yesterday's queries already logged → skip 0 (different date → new queries)
+4. SERP: collects results
+5. URL dedup: removes any articles already in BQ from previous overlap
+6. Scrape + write new content
 
-**Scenario**: Run same date range 5 times
-**Cost**: 1x BigQuery storage + 1x scraping (4 runs skipped)
-
-### Backfill Cost
-
-**Before**: Manual backfill = separate run from 2026-01-01
-**After**: Automatic backfill = happens in next run (no extra API calls)
-
----
-
-## Common Scenarios
-
-### Scenario 1: Daily Scheduled Run
-
-**Setup**: Cloud Scheduler runs daily at 2 AM
-**Date Range**: Yesterday to today
-**Behavior**:
-- ✅ First run: Collects all data
-- ✅ Second run (if re-run): Skips duplicates
-- ✅ New company added: Auto-backfills from 2026-01-01
-
-### Scenario 2: Weekly Full Refresh
-
-**Setup**: Cloud Scheduler runs weekly
-**Date Range**: Last 7 days
-**Behavior**:
-- ✅ Collects only new URLs from last 7 days
-- ✅ Skips URLs already collected in previous daily runs
-- ✅ Minimal duplicate processing
-
-### Scenario 3: Historical Data Collection
-
-**Setup**: Manually run for large date range
-**Date Range**: 2026-01-01 to 2026-02-07
-**Behavior**:
-- ✅ First run: Collects everything
-- ✅ Second run: Skips everything (fully idempotent)
-- ✅ No duplicates, no wasted cost
-
-### Scenario 4: Adding Multiple New Companies
-
-**Setup**: Bulk add 10 new companies to reference data
-**Next Run**: 2026-02-01 to 2026-02-07
-**Behavior**:
-- 🔄 Detects 10 new URLs
-- 🔄 Extends date range to 2026-01-01 for these companies
-- ✅ Backfills all 10 companies from 2026-01-01
-- ✅ Existing companies: only 2026-02-01 to 2026-02-07
-- ✅ Single run gets complete data for all companies
+**Cost**: Only new articles (from 2026-03-04) are scraped and stored.
 
 ---
 
-## Monitoring
+### Scenario 2: Re-running the same date range (idempotency test)
 
-### Check for Failed Runs
+```bash
+curl -X POST $SERVICE_URL \
+  -d '{"start_date": "2026-03-01", "end_date": "2026-03-03"}'
+# Run a second time with the same body
+curl -X POST $SERVICE_URL \
+  -d '{"start_date": "2026-03-01", "end_date": "2026-03-03"}'
+```
+
+Second run result:
+- Layer 2: All 100 queries already in `queries_executed` → **0 SERP API calls**
+- Layer 3: All URLs already in metadata → nothing written to BQ
+- Cost: ~$0 (only BigQuery read cost for the dedup checks)
+
+---
+
+### Scenario 3: New company added to reference data
+
+Add "NewCorp Inc." to the reference BigQuery table, then run normally:
+
+```bash
+curl -X POST $SERVICE_URL
+```
+
+What happens:
+1. Auto-detect last run date
+2. `get_collected_newsroom_urls()` finds NewCorp's newsroom URL is not in
+   `press_release_metadata.newsroom_url` → marks it as needing backfill
+3. Extends `effective_start_date = "2026-01-01"` for NewCorp's queries
+4. Existing companies: their queries for the recent window are already in
+   `queries_executed` → skipped (layer 2)
+5. NewCorp queries execute; URL dedup (layer 3) prevents any overlap with
+   existing articles
+
+**Cost**: Only pay SERP API for NewCorp's historical queries.
+
+---
+
+### Scenario 4: Force refresh (bypass deduplication)
+
+```bash
+curl -X POST $SERVICE_URL \
+  -d '{"start_date": "2026-03-01", "end_date": "2026-03-03", "force_refresh": true}'
+```
+
+- All dedup layers are bypassed
+- All queries are re-executed; all URLs are re-scraped
+- ⚠️ Creates duplicate rows in BigQuery — use sparingly
+
+---
+
+## Monitoring Idempotency
+
 ```sql
-SELECT *
+-- Check a specific date range was collected exactly once
+SELECT COUNT(*) AS run_count
 FROM `pressure_monitoring.collection_runs`
-WHERE status = 'failed'
-ORDER BY start_timestamp DESC;
-```
+WHERE status = 'completed'
+  AND start_date <= '2026-03-03'
+  AND end_date >= '2026-03-01';
 
-### Check Deduplication Effectiveness
-```sql
--- Compare URLs collected vs. URLs after dedup
+-- Verify no duplicate press releases
+SELECT press_release_id, COUNT(*) AS n
+FROM `pressure_monitoring.press_release_metadata`
+GROUP BY press_release_id
+HAVING n > 1;
+
+-- Check dedup effectiveness (large queries_skipped = money saved)
 SELECT
-  run_id,
-  urls_collected as total_found,
-  articles_scraped as after_dedup,
-  urls_collected - articles_scraped as duplicates_skipped
+  run_id, start_date, end_date,
+  queries_count AS executed,
+  urls_collected
 FROM `pressure_monitoring.collection_runs`
 WHERE status = 'completed'
 ORDER BY start_timestamp DESC
 LIMIT 10;
 ```
 
-### Identify Backfill Runs
-```sql
-SELECT *
-FROM `pressure_monitoring.collection_runs`
-WHERE status = 'completed'
-  AND start_date = '2026-01-01'  -- Backfill runs start from 2026-01-01
-ORDER BY start_timestamp DESC;
+---
+
+## Deduplication in the CLI (`main_cli.py`)
+
+The CLI also uses BigQuery for incremental mode:
+
+```bash
+python main_cli.py --incremental
 ```
+
+`find_last_run_date()` checks `collection_runs` first (so CLI incremental mode
+aligns with Cloud Run history), then falls back to local checkpoint files.
+
+The CLI uses `URLTracker` (file-based) for in-session URL deduplication —
+this is supplementary to the BQ-based dedup above.
 
 ---
 
 ## Troubleshooting
 
-### Issue: Duplicates in BigQuery
+### Issue: `press_release_id` duplicates appear
 
-**Symptom**: Same URL appears multiple times
-**Cause**: `force_refresh: true` was used
-**Solution**:
+**Cause**: `force_refresh=true` was used, or `get_existing_press_release_ids()`
+failed silently before a write.
+
+**Fix**:
 ```sql
--- Remove duplicates (keep earliest)
-CREATE OR REPLACE TABLE `pressure_monitoring.collected_articles` AS
-SELECT * EXCEPT(row_num)
+-- Deduplicate: keep earliest row per press_release_id
+CREATE OR REPLACE TABLE `pressure_monitoring.press_release_metadata` AS
+SELECT * EXCEPT(rn)
 FROM (
   SELECT *,
-    ROW_NUMBER() OVER (PARTITION BY url ORDER BY collection_timestamp ASC) as row_num
-  FROM `pressure_monitoring.collected_articles`
+    ROW_NUMBER() OVER (PARTITION BY press_release_id ORDER BY collection_timestamp ASC) AS rn
+  FROM `pressure_monitoring.press_release_metadata`
 )
-WHERE row_num = 1;
+WHERE rn = 1;
 ```
 
-### Issue: Backfill Not Happening
+### Issue: `--incremental` starts from wrong date
 
-**Symptom**: New company added but no historical data
-**Check**: Query collection_runs table
-**Cause**: Company's pressroom_url not in reference data
-**Solution**: Ensure reference data has correct pressroom_url column
+**Check**: Query `collection_runs` for the most recent completed run:
+```sql
+SELECT run_id, start_date, end_date, status, end_timestamp
+FROM `pressure_monitoring.collection_runs`
+ORDER BY start_timestamp DESC
+LIMIT 5;
+```
 
-### Issue: All URLs Skipped (0 Collected)
+### Issue: Backfill not triggering for a new company
 
-**Symptom**: `deduplicated_urls: 150, serp_results_count: 0`
-**Cause**: Date range already fully collected
-**Solution**: This is normal! Pipeline is working correctly (idempotency)
-**Action**: Either:
-  - Request a different date range
-  - Use `force_refresh: true` if re-scraping is needed
+**Check**: Verify the company's `newsroom_url` in reference data matches what's
+in `press_release_metadata.newsroom_url`:
+```sql
+SELECT DISTINCT newsroom_url
+FROM `pressure_monitoring.press_release_metadata`
+WHERE company = 'NewCorp Inc.'
+LIMIT 5;
+```
 
 ---
 
 ## Best Practices
 
-1. **Normal Operations**: Never use `force_refresh` for scheduled runs
-2. **Adding Companies**: Just add to reference data, next run auto-backfills
-3. **Re-scraping**: Only use `force_refresh` if content has genuinely changed
-4. **Monitoring**: Regularly check `collection_runs` for failed runs
-5. **Cost Control**: Idempotency saves money - let it work!
-
----
-
-## Configuration
-
-### Backfill Start Date
-
-**Current**: Hardcoded to `2026-01-01` in main.py
-**Location**: `run_serp_collection()` function
-**To Change**:
-```python
-backfill_urls = storage.identify_urls_needing_backfill(
-    current_urls=current_urls,
-    backfill_start_date="2025-01-01"  # Change this
-)
-```
-
-### Deduplication Window
-
-**Current**: Checks entire history
-**To Limit** (e.g., only last 30 days):
-```python
-already_collected = storage.get_collected_urls_for_date_range(
-    start_date="2026-01-08",  # 30 days ago
-    end_date=end_date
-)
-```
+1. **Daily trigger**: Send an empty POST — let BQ auto-detect the date range.
+2. **Never use `force_refresh`** for scheduled runs (creates duplicates).
+3. **Adding companies**: Just update reference data; next run auto-backfills.
+4. **Monitor `collection_runs`**: Check `status = 'failed'` after each run.
+5. **Let idempotency work**: Re-running any range is always safe and nearly free.

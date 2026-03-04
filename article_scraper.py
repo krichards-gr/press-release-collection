@@ -82,6 +82,12 @@ MAX_WORKERS = 10  # Number of concurrent threads for scraping
 TIMEOUT_SECONDS = 30  # Timeout for article download
 RETRY_ATTEMPTS = 2  # Number of retries for transient failures
 RATE_LIMIT_DELAY = 0.1  # Delay between requests (seconds) to avoid overwhelming servers
+MIN_CONTENT_LENGTH = 400  # Minimum characters of extracted text to consider a scrape successful.
+                           # 100 was too low: JS-rendered pages return a static nav/shell (~327
+                           # chars) that trafilatura extracts as "content", stopping the fallback
+                           # chain before Bright Data Unlocker (which renders JS) can run.
+                           # Note: short legitimate articles (105-294 chars) are scraped by
+                           # newspaper3k (#1 in chain) which keeps its own 100-char threshold.
 
 # Configure browser user-agent to avoid being blocked by websites
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'
@@ -314,11 +320,12 @@ def scrape_with_trafilatura(url: str) -> Optional[Dict]:
         # Use cloudscraper to bypass bot protection
         scraper = cloudscraper.create_scraper()
         response = scraper.get(url, timeout=TIMEOUT_SECONDS)
+        response.raise_for_status()  # Reject bot-protection/error pages (4xx, 5xx)
 
         # Extract content with trafilatura
         text = trafilatura.extract(response.text, include_comments=False)
 
-        if not text or len(text.strip()) < 100:
+        if not text or len(text.strip()) < MIN_CONTENT_LENGTH:
             return None
 
         # Extract metadata (title, date)
@@ -348,6 +355,7 @@ def scrape_with_readability(url: str) -> Optional[Dict]:
         # Use cloudscraper to bypass bot protection
         scraper = cloudscraper.create_scraper()
         response = scraper.get(url, timeout=TIMEOUT_SECONDS)
+        response.raise_for_status()  # Reject bot-protection/error pages (4xx, 5xx)
 
         # Apply readability
         doc = Document(response.text)
@@ -356,7 +364,7 @@ def scrape_with_readability(url: str) -> Optional[Dict]:
         soup = BeautifulSoup(doc.summary(), 'html.parser')
         text = soup.get_text(separator='\n', strip=True)
 
-        if not text or len(text.strip()) < 100:
+        if not text or len(text.strip()) < MIN_CONTENT_LENGTH:
             return None
 
         return {
@@ -543,9 +551,9 @@ def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS,
     metrics.start_time = time.time()
 
     # Configure newspaper
-    config = Config()
-    config.browser_user_agent = USER_AGENT
-    config.request_timeout = TIMEOUT_SECONDS
+    newspaper_config = Config()
+    newspaper_config.browser_user_agent = USER_AGENT
+    newspaper_config.request_timeout = TIMEOUT_SECONDS
 
     # Storage for successful scrapes
     articles = []
@@ -563,7 +571,7 @@ def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS,
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks
         future_to_url = {
-            executor.submit(scrape_single_article, url, config, metrics): url
+            executor.submit(scrape_single_article, url, newspaper_config, metrics): url
             for url in urls
         }
 
@@ -590,7 +598,8 @@ def scrape_articles_concurrent(urls: List[str], max_workers: int = MAX_WORKERS,
 
     # Save error log if there were failures
     if metrics.failed > 0:
-        metrics.save_error_log(str(config.SCRAPER_ERRORS_FILE))
+        from config import config as pipeline_config
+        metrics.save_error_log(str(pipeline_config.SCRAPER_ERRORS_FILE))
 
     return articles
 

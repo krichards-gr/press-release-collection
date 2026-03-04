@@ -5,14 +5,16 @@ Automated end-to-end pipeline for collecting and analyzing corporate press relea
 ## 🚀 Features
 
 - **Cloud-Native**: Deployed on Google Cloud Run with BigQuery storage
+- **Daily Scheduling**: Send a parameterless POST — the pipeline auto-detects where it left off using BigQuery run history (no hardcoded dates needed)
+- **Split-Table Schema**: `press_release_metadata` + `press_release_content` — mirrors the earnings-call-collector pattern for clean joins and efficient storage
+- **3-Layer Deduplication**: Auto date detection → query-level SERP dedup → URL-level BigQuery dedup; safe and nearly free to re-run
 - **HTTP API**: RESTful JSON endpoint for programmatic access
 - **Complete Pipeline**: Reference Data → SERP Collection → Article Scraping → Sentiment Analysis → BigQuery
 - **Multi-Scraper Fallback**: 4-tier scraper chain (newspaper3k → trafilatura → readability → goose3) for 90%+ success rate
 - **Full Titles**: Scraped page titles replace truncated SERP titles wherever available
 - **Hang Protection**: Per-query timeout skips hung SERP requests; failures logged for retry via alternative API
 - **Scalable**: Stateless design, automatic scaling, containerized deployment
-- **Schedulable**: Cloud Scheduler integration for automated runs
-- **Production-Ready**: Comprehensive error handling, monitoring, and logging
+- **Production-Ready**: Comprehensive error handling, run logging, and monitoring
 
 ## 📋 Requirements
 
@@ -85,16 +87,22 @@ chmod +x deploy.sh
 
 **What it does**:
 - ✅ Deploys to Cloud Run from GitHub
-- ✅ Sets up Cloud Scheduler (3 daily runs: midnight, noon, 4pm EST)
+- ✅ Sets up Cloud Scheduler for daily automated runs
 - ✅ Configures BigQuery and Secret Manager
-- ✅ Includes idempotency and automatic backfill
+- ✅ Idempotent — safe to trigger multiple times per day
 
 **Deployment Guides**:
 - [DEPLOY_FROM_GITHUB.md](docs/DEPLOY_FROM_GITHUB.md) - Deploy from GitHub repository (recommended)
 - [DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md) - Quick checklist and testing
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Advanced deployment options
 
-**Test Deployment**:
+**Daily Trigger (no parameters needed)**:
+```bash
+# The pipeline queries BigQuery for the last run date automatically
+curl -X POST $SERVICE_URL
+```
+
+**Test with explicit dates**:
 ```bash
 curl -X POST $SERVICE_URL \
   -H "Content-Type: application/json" \
@@ -176,12 +184,19 @@ python main_cli.py --force-refresh
 
 ```
 project.pressure_monitoring/
-├── collected_articles     # SERP metadata + scraped article content
-├── article_enrichments    # Sentiment and other analysis results
-└── collection_runs        # Pipeline execution log (idempotency & backfill)
+├── press_release_metadata   # One row per release: SERP fields + company info
+├── press_release_content    # Scraped article text (joined by press_release_id)
+├── article_enrichments      # Sentiment and analysis results (regenerable)
+└── collection_runs          # Pipeline run log: status, dates, queries executed
 ```
 
+Tables are linked by `press_release_id = MD5(url)`, mirroring the
+metadata/content split used in the `earnings-call-collector` project.
 All tables are partitioned by timestamp for efficient querying.
+
+> **Legacy**: `collected_articles` still exists in BigQuery with historical data
+> from before the schema split. It is no longer written to by the current pipeline.
+
 See [BIGQUERY_SCHEMA.md](docs/BIGQUERY_SCHEMA.md) for full schema details.
 
 ### Local Files (Backup/Debug)
@@ -242,15 +257,22 @@ outputs/
 
 ## 📝 Example Workflows
 
-### Daily Automated Collection
+### Daily Automated Collection (Cloud Run — recommended)
 ```bash
-# Cron job: Run daily at 2 AM
-0 2 * * * cd /path/to/pipeline && python main_cli.py --last-n-days 1
+# Cloud Scheduler fires daily — no parameters needed.
+# Pipeline auto-detects start_date from last successful run in BigQuery.
+curl -X POST $SERVICE_URL
 ```
 
-### Weekly Full Refresh
+### Daily Automated Collection (CLI)
 ```bash
-python main_cli.py --last-n-days 7 --force-refresh
+# Uses BigQuery run history first, then checkpoint fallback
+python main_cli.py --incremental
+```
+
+### Last N Days (CLI)
+```bash
+python main_cli.py --last-n-days 7
 ```
 
 ### Custom Analysis Period
