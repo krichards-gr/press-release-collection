@@ -353,22 +353,27 @@ class BigQueryStorage:
 
     def get_existing_press_release_ids(self) -> set:
         """
-        Load all existing press_release_ids from BigQuery.
+        Load press_release_ids that have been fully scraped (have a row in
+        press_release_content).
 
-        Used for URL-level deduplication BEFORE writing new records —
-        prevents paying to re-scrape articles already in the database.
-        Analogous to get_existing_ids_bq() in earnings-call-collector.
+        Used for URL-level deduplication BEFORE writing new records — prevents
+        paying to re-scrape articles that already have content in the database.
+
+        Intentionally checks press_release_content rather than
+        press_release_metadata: a URL that was discovered (metadata written) but
+        never successfully scraped (no content row) is NOT considered done, so it
+        will be retried on the next run rather than silently skipped forever.
 
         Returns:
-            Set of press_release_id strings already in BigQuery.
+            Set of press_release_id strings that already have scraped content.
             Returns empty set on first run or if table doesn't exist.
         """
-        table_id = self._get_table_ref("press_release_metadata")
+        table_id = self._get_table_ref("press_release_content")
 
         try:
             self.client.get_table(table_id)
         except NotFound:
-            print("📝 press_release_metadata table not found (first run) — no existing IDs")
+            print("📝 press_release_content table not found (first run) — no existing IDs")
             return set()
 
         query = f"SELECT press_release_id FROM `{table_id}`"
@@ -490,6 +495,27 @@ class BigQueryStorage:
         # Generate deterministic ID if not already present
         if 'press_release_id' not in df.columns:
             df['press_release_id'] = df['url'].apply(_generate_press_release_id)
+
+        # Skip IDs already in press_release_metadata to prevent duplicate rows.
+        # This is needed because get_existing_press_release_ids() now checks
+        # press_release_content, so URLs discovered but never scraped will
+        # pass SERP dedup and reach here a second time.
+        try:
+            existing_query = f"SELECT press_release_id FROM `{table_id}`"
+            existing_meta_ids = {row.press_release_id
+                                 for row in self.client.query(existing_query).result()}
+            if existing_meta_ids:
+                before = len(df)
+                df = df[~df['press_release_id'].isin(existing_meta_ids)]
+                skipped = before - len(df)
+                if skipped:
+                    print(f"📝 Skipped {skipped:,} metadata rows already in BigQuery")
+        except Exception as e:
+            print(f"⚠️  Could not check existing metadata IDs: {e} — proceeding anyway")
+
+        if df.empty:
+            print("⚠️  No new press release metadata to write")
+            return 0
 
         # Convert publish_date to datetime if present
         if 'publish_date' in df.columns:
