@@ -63,6 +63,7 @@ class Config:
     SERP_RETRY_ATTEMPTS = int(os.getenv('SERP_RETRY_ATTEMPTS', '3'))
     SERP_TIMEOUT = int(os.getenv('SERP_TIMEOUT', '15'))  # Per-request timeout (must be <= SERP_QUERY_TIMEOUT)
     SERP_QUERY_TIMEOUT = int(os.getenv('SERP_QUERY_TIMEOUT', '20'))  # Max total wall-clock seconds per query before skipping
+    SERP_MAX_WORKERS = int(os.getenv('SERP_MAX_WORKERS', '5'))  # Concurrent SERP query threads
 
     # Bright Data Unlocker API (premium fallback scraper for bot-protected sites)
     BRIGHT_DATA_UNLOCKER_API_KEY = os.getenv('BRIGHT_DATA_UNLOCKER_API_KEY', '').strip()
