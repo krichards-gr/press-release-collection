@@ -148,6 +148,11 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                     query_timed_out = True
                     break
                 try:
+                    # Use the lesser of the per-request timeout and remaining query budget
+                    # so a single request can never exceed the query deadline
+                    remaining = max(1, config.SERP_QUERY_TIMEOUT - (time.time() - query_start_time))
+                    request_timeout = min(config.SERP_TIMEOUT, remaining)
+
                     # Send request through Bright Data SERP proxy
                     response = requests.get(
                         current_url,
@@ -155,7 +160,7 @@ def collect_search_results(search_queries: List[str], max_pages: int = None) -> 
                             'http': config.BRIGHT_DATA_PROXY_URL_HTTP,
                             'https': config.BRIGHT_DATA_PROXY_URL_HTTPS
                         },
-                        timeout=config.SERP_TIMEOUT,
+                        timeout=request_timeout,
                         verify=False  # Disable SSL verification for Bright Data proxy (uses self-signed cert)
                     )
                     response.raise_for_status()
