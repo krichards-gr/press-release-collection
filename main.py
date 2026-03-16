@@ -16,6 +16,7 @@ HTTP API:
     Body: {
         "start_date": "YYYY-MM-DD",   // optional — auto-detected from last run
         "end_date": "YYYY-MM-DD",     // optional — defaults to today
+        "mode": "full",               // optional — "test" limits to 5 SERP queries
         "force_refresh": false,
         "skip_scraping": false
     }
@@ -95,11 +96,16 @@ def validate_request(request_json: Dict) -> Tuple[bool, str, Dict]:
     Returns:
         (is_valid, error_message, validated_params)
     """
+    mode = request_json.get('mode', 'full')
+    if mode not in ('test', 'full'):
+        return False, f"Invalid mode '{mode}'. Must be 'test' or 'full'", {}
+
     params = {
         'start_date': request_json.get('start_date'),
         'end_date': request_json.get('end_date'),
         'force_refresh': request_json.get('force_refresh', False),
         'skip_scraping': request_json.get('skip_scraping', False),
+        'mode': mode,
     }
 
     if not params['start_date'] or not params['end_date']:
@@ -129,6 +135,7 @@ def run_serp_collection(
     force_refresh: bool,
     run_id: str,
     storage: BigQueryStorage,
+    test_mode: bool = False,
 ) -> Tuple[Dict[str, Any], Optional[pd.DataFrame]]:
     """
     Execute SERP collection with query-level and URL-level deduplication.
@@ -239,6 +246,13 @@ def run_serp_collection(
     else:
         stats['queries_skipped'] = 0
 
+    # ------------------------------------------------------------------
+    # Test mode: limit to first 5 queries to conserve SERP credits
+    # ------------------------------------------------------------------
+    if test_mode and len(queries_to_execute) > 5:
+        print(f"[{run_id}] 🧪 TEST MODE — limiting to 5 of {len(queries_to_execute):,} queries")
+        queries_to_execute = queries_to_execute[:5]
+
     stats['queries_executed'] = len(queries_to_execute)
     stats['all_queries'] = queries_to_execute  # stored for run log
 
@@ -326,14 +340,11 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
     print(f"[{run_id}] Launching article scraper...")
 
     result = subprocess.run(
-        [sys.executable, "article_scraper.py"],
-        capture_output=True,
-        text=True,
-        timeout=3600  # 1 hour
+        [sys.executable, "-u", "article_scraper.py"],
+        timeout=3600,  # 1 hour
     )
 
     if result.returncode != 0:
-        print(f"[{run_id}] Article scraper failed:\n{result.stderr}")
         raise RuntimeError(f"Article scraper exited with code {result.returncode}")
 
     # ------------------------------------------------------------------
@@ -471,13 +482,19 @@ def press_release_collection(request: Request):
         # ------------------------------------------------------------------
         # SERP collection
         # ------------------------------------------------------------------
+        is_test = params['mode'] == 'test'
+        if is_test:
+            print(f"[{run_id}] 🧪 Running in TEST mode (max 5 SERP queries)")
+
         serp_stats, serp_df = run_serp_collection(
             start_date=params['start_date'],
             end_date=params['end_date'],
             force_refresh=params['force_refresh'],
             run_id=run_id,
             storage=storage,
+            test_mode=is_test,
         )
+        response['stats']['mode'] = params['mode']
         response['stats'].update({k: v for k, v in serp_stats.items() if k != 'all_queries'})
 
         # ------------------------------------------------------------------
