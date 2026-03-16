@@ -703,7 +703,7 @@ if __name__ == "__main__":
 
         try:
             doc = nlp(str(text))
-            polarity = doc._.polarity
+            polarity = doc._.polarity.compound
 
             # Classification thresholds (adjust based on validation results)
             if polarity > 0.1:
