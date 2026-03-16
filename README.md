@@ -186,7 +186,7 @@ python main_cli.py --force-refresh
 project.pressure_monitoring/
 ├── press_release_metadata   # One row per release: SERP fields + company info
 ├── press_release_content    # Scraped article text (joined by press_release_id)
-├── article_enrichments      # Sentiment and analysis results (regenerable)
+├── press_release_enriched   # Sentiment analysis results (regenerable)
 └── collection_runs          # Pipeline run log: status, dates, queries executed
 ```
 

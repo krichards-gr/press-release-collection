@@ -9,7 +9,7 @@
 |-------|-------------------------------------|---------|
 | `press_release_metadata` | `earnings_call_transcript_metadata` | One row per press release — SERP fields + company info |
 | `press_release_content` | `earnings_call_transcript_content` | Scraped article text for each release |
-| `article_enrichments` | — | Sentiment and future NLP analysis (can be regenerated) |
+| `press_release_enriched` | — | Sentiment analysis (can be regenerated) |
 | `collection_runs` | — | Pipeline run log — idempotency and scheduling |
 
 > **Legacy**: `collected_articles` still exists in BigQuery with historical data
@@ -102,9 +102,9 @@ WHERE m.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DA
 
 ---
 
-## Table 3: `article_enrichments`
+## Table 3: `press_release_enriched`
 
-**Purpose**: Analysis results (sentiment, entities, issues).
+**Purpose**: Sentiment analysis results.
 Can be regenerated/versioned without re-scraping.
 Joined to metadata via `url`.
 
@@ -114,10 +114,7 @@ Joined to metadata via `url`.
 |--------|------|------|-------------|
 | `url` | STRING | REQUIRED | Article URL (foreign key to `press_release_metadata`) |
 | `sentiment` | STRING | NULLABLE | Sentiment label: positive, negative, neutral |
-| `sentiment_score` | FLOAT | NULLABLE | Sentiment confidence score |
-| `issue_labels` | STRING | REPEATED | Identified issues/topics |
-| `entity_labels` | STRING | REPEATED | Named entities mentioned |
-| `custom_metadata` | JSON | NULLABLE | Additional metadata as JSON |
+| `sentiment_score` | FLOAT | NULLABLE | Sentiment polarity score (-1.0 to 1.0) |
 | `enrichment_timestamp` | TIMESTAMP | REQUIRED | When enrichments were generated |
 | `enrichment_version` | STRING | NULLABLE | Version of enrichment pipeline (e.g. "v1.0") |
 | `run_id` | STRING | NULLABLE | Pipeline run identifier |
@@ -130,7 +127,7 @@ Joined to metadata via `url`.
 WITH latest AS (
   SELECT *,
     ROW_NUMBER() OVER (PARTITION BY url ORDER BY enrichment_timestamp DESC) AS rn
-  FROM `pressure_monitoring.article_enrichments`
+  FROM `pressure_monitoring.press_release_enriched`
 )
 SELECT url, sentiment, sentiment_score, enrichment_version
 FROM latest
@@ -230,7 +227,7 @@ LEFT JOIN `pressure_monitoring.press_release_content` c
 LEFT JOIN (
   SELECT url, sentiment,
     ROW_NUMBER() OVER (PARTITION BY url ORDER BY enrichment_timestamp DESC) AS rn
-  FROM `pressure_monitoring.article_enrichments`
+  FROM `pressure_monitoring.press_release_enriched`
 ) e ON m.url = e.url AND e.rn = 1
 WHERE m.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
 ORDER BY m.company, m.publish_date DESC;
@@ -247,7 +244,7 @@ from bigquery_storage import BigQueryStorage
 storage = BigQueryStorage()
 storage.initialize_tables()
 # Creates: press_release_metadata, press_release_content,
-#          article_enrichments, collection_runs
+#          press_release_enriched, collection_runs
 ```
 
 ---

@@ -327,7 +327,7 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
     runs article_scraper.py as a subprocess, then writes:
         • press_release_metadata  — SERP + company fields (from f100_joined.csv)
         • press_release_content   — scraped text (rows where article_text is set)
-        • article_enrichments     — sentiment (from enriched.csv)
+        • press_release_enriched  — sentiment (from enriched.csv)
 
     Returns:
         Stats dictionary.
@@ -373,11 +373,13 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
         enriched_df = pd.read_csv(config.ENRICHED_RESULTS_FILE)
         stats['articles_enriched'] = len(enriched_df)
 
-        if not enriched_df.empty:
-            enrichments_only = enriched_df[['url', 'sentiment']].copy() \
-                if 'url' in enriched_df.columns else pd.DataFrame()
+        if not enriched_df.empty and 'url' in enriched_df.columns:
+            enrichment_cols = ['url', 'sentiment']
+            if 'sentiment_score' in enriched_df.columns:
+                enrichment_cols.append('sentiment_score')
+            enrichments_only = enriched_df[enrichment_cols].copy()
             if not enrichments_only.empty:
-                storage.write_article_enrichments(
+                storage.write_press_release_enriched(
                     enrichments_only, run_id=run_id, enrichment_version="v1.0"
                 )
     else:

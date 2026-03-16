@@ -47,7 +47,7 @@ powershell scripts/deploy.ps1  # Windows
 **Storage (`bigquery_storage.py`):**
 - `BigQueryStorage` class manages all table operations
 - Split-table schema: `press_release_metadata` + `press_release_content` (joined by `press_release_id = MD5(url)`)
-- `article_enrichments` — sentiment/analysis (regenerable)
+- `press_release_enriched` — sentiment analysis (regenerable)
 - `collection_runs` — pipeline run log for idempotency
 - Legacy `collected_articles` table exists but is no longer written to
 

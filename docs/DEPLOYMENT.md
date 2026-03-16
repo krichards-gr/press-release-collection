@@ -292,7 +292,7 @@ SELECT
   COUNT(DISTINCT e.url) as enriched_articles,
   ROUND(COUNT(DISTINCT e.url) / COUNT(DISTINCT c.url) * 100, 2) as coverage_pct
 FROM `pressure_monitoring.collected_articles` c
-LEFT JOIN `pressure_monitoring.article_enrichments` e ON c.url = e.url
+LEFT JOIN `pressure_monitoring.press_release_enriched` e ON c.url = e.url
 WHERE c.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY);
 ```
 

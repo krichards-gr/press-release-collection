@@ -8,7 +8,7 @@ Schema Design:
 --------------
 1. press_release_metadata: One row per press release — SERP fields + company info (immutable)
 2. press_release_content:  One row per scraped release — article text, summary, keywords
-3. article_enrichments:    URL + analysis results (sentiment, entities) — can be regenerated
+3. press_release_enriched:  URL + analysis results (sentiment) — can be regenerated
 4. collection_runs:        Pipeline execution log — idempotency, backfill, run auditing
 
 The metadata/content split mirrors the earnings-call-collector pattern:
@@ -193,33 +193,25 @@ class BigQueryStorage:
             self.client.create_table(table)
             print(f"✓ Created table: {table_id}")
 
-    def create_article_enrichments_table(self):
+    def create_press_release_enriched_table(self):
         """
-        Create table for article enrichments (sentiment, entities, issues).
+        Create table for press release enrichments (sentiment analysis).
 
         This table stores analysis results that can be regenerated.
         URL is the primary key to join back to press_release_metadata.
         """
-        table_id = self._get_table_ref("article_enrichments")
+        table_id = self._get_table_ref("press_release_enriched")
 
         schema = [
             # Primary key
             bigquery.SchemaField("url", "STRING", mode="REQUIRED",
                                  description="Article URL (foreign key to press_release_metadata)"),
 
-            # Current enrichments
+            # Enrichments
             bigquery.SchemaField("sentiment", "STRING", mode="NULLABLE",
                                  description="Sentiment label: positive, negative, neutral"),
             bigquery.SchemaField("sentiment_score", "FLOAT", mode="NULLABLE",
-                                 description="Sentiment confidence score"),
-
-            # Future enrichments (placeholder fields)
-            bigquery.SchemaField("issue_labels", "STRING", mode="REPEATED",
-                                 description="Identified issues/topics"),
-            bigquery.SchemaField("entity_labels", "STRING", mode="REPEATED",
-                                 description="Named entities mentioned"),
-            bigquery.SchemaField("custom_metadata", "JSON", mode="NULLABLE",
-                                 description="Additional metadata as JSON"),
+                                 description="Sentiment polarity score (-1.0 to 1.0)"),
 
             # Metadata
             bigquery.SchemaField("enrichment_timestamp", "TIMESTAMP", mode="REQUIRED",
@@ -343,7 +335,7 @@ class BigQueryStorage:
         print("\n📊 Initializing BigQuery tables...")
         self.create_press_release_metadata_table()
         self.create_press_release_content_table()
-        self.create_article_enrichments_table()
+        self.create_press_release_enriched_table()
         self.create_collection_runs_table()
         print()
 
@@ -721,15 +713,14 @@ class BigQueryStorage:
     # ENRICHMENTS
     # =========================================================================
 
-    def write_article_enrichments(self, df: pd.DataFrame, run_id: str = None,
-                                   enrichment_version: str = "v1.0") -> int:
+    def write_press_release_enriched(self, df: pd.DataFrame, run_id: str = None,
+                                      enrichment_version: str = "v1.0") -> int:
         """
-        Write article enrichments (sentiment, entities, etc.) to BigQuery.
+        Write press release enrichments (sentiment) to BigQuery.
 
         Expected DataFrame columns:
         - Required: url
-        - Current: sentiment, sentiment_score
-        - Future: issue_labels, entity_labels
+        - Enrichments: sentiment, sentiment_score
 
         Args:
             df:                  DataFrame with enrichment data
@@ -743,7 +734,7 @@ class BigQueryStorage:
             print("⚠️  No enrichments to write")
             return 0
 
-        table_id = self._get_table_ref("article_enrichments")
+        table_id = self._get_table_ref("press_release_enriched")
 
         df = df.copy()
         df['enrichment_timestamp'] = datetime.utcnow()
@@ -753,19 +744,8 @@ class BigQueryStorage:
         if 'url' not in df.columns:
             raise ValueError("DataFrame must have 'url' column")
 
-        if 'issue_labels' in df.columns and df['issue_labels'].dtype == 'object':
-            df['issue_labels'] = df['issue_labels'].apply(
-                lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [str(x)])
-            )
-
-        if 'entity_labels' in df.columns and df['entity_labels'].dtype == 'object':
-            df['entity_labels'] = df['entity_labels'].apply(
-                lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [str(x)])
-            )
-
         schema_columns = [
             'url', 'sentiment', 'sentiment_score',
-            'issue_labels', 'entity_labels', 'custom_metadata',
             'enrichment_timestamp', 'enrichment_version', 'run_id'
         ]
         df_to_write = df[[col for col in schema_columns if col in df.columns]]
@@ -777,7 +757,7 @@ class BigQueryStorage:
         job = self.client.load_table_from_dataframe(df_to_write, table_id, job_config=job_config)
         job.result()
 
-        print(f"✓ Wrote {len(df_to_write):,} article enrichments to BigQuery: {table_id}")
+        print(f"✓ Wrote {len(df_to_write):,} enrichments to press_release_enriched: {table_id}")
         return len(df_to_write)
 
     # =========================================================================
@@ -895,7 +875,7 @@ class BigQueryStorage:
             List of URLs needing enrichment.
         """
         metadata_table = self._get_table_ref("press_release_metadata")
-        enrichments_table = self._get_table_ref("article_enrichments")
+        enrichments_table = self._get_table_ref("press_release_enriched")
 
         if enrichment_version:
             query = f"""
@@ -981,5 +961,5 @@ if __name__ == "__main__":
     print("Tables created/verified:")
     print("  • press_release_metadata  (new — one row per press release)")
     print("  • press_release_content   (new — scraped text for each release)")
-    print("  • article_enrichments     (sentiment, entities, etc.)")
+    print("  • press_release_enriched  (sentiment analysis)")
     print("  • collection_runs         (pipeline run log)")

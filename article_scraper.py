@@ -684,9 +684,9 @@ if __name__ == "__main__":
     # asent uses a lexicon approach similar to VADER
     nlp.add_pipe('asent_en_v1')
 
-    def get_sentiment_label(text):
+    def get_sentiment(text):
         """
-        Analyze text sentiment using spaCy + asent and return a categorical label.
+        Analyze text sentiment using spaCy + asent.
 
         The polarity score from asent ranges from -1 (most negative) to +1 (most positive).
         We use thresholds of ±0.1 to classify text as positive/negative/neutral.
@@ -695,10 +695,11 @@ if __name__ == "__main__":
             text: String content to analyze (typically article description or full text)
 
         Returns:
-            str: 'positive', 'negative', or 'neutral'
+            tuple: (label, score) where label is 'positive'/'negative'/'neutral'
+                   and score is the raw polarity float
         """
         if pd.isna(text) or text == '':
-            return 'neutral'
+            return 'neutral', 0.0
 
         try:
             doc = nlp(str(text))
@@ -706,18 +707,21 @@ if __name__ == "__main__":
 
             # Classification thresholds (adjust based on validation results)
             if polarity > 0.1:
-                return 'positive'
+                label = 'positive'
             elif polarity < -0.1:
-                return 'negative'
+                label = 'negative'
             else:
-                return 'neutral'
+                label = 'neutral'
+            return label, round(float(polarity), 4)
         except:
-            return 'neutral'  # Default to neutral if processing fails
+            return 'neutral', 0.0
 
     # Apply sentiment analysis to article descriptions
     # Note: Using description rather than full text for speed
     tqdm.pandas(desc="Analyzing Sentiment")
-    joined['sentiment'] = joined['description'].progress_apply(get_sentiment_label)
+    sentiment_results = joined['description'].progress_apply(get_sentiment)
+    joined['sentiment'] = sentiment_results.apply(lambda x: x[0])
+    joined['sentiment_score'] = sentiment_results.apply(lambda x: x[1])
 
     # Write enriched data to CSV
     joined.to_csv(config.ENRICHED_RESULTS_FILE, index=False)
