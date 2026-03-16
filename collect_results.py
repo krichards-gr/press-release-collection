@@ -144,10 +144,10 @@ def _test_proxy_connectivity(proxies: dict):
             test_response = requests.get(
                 "https://www.google.com/search?q=test&brd_json=1",
                 proxies=proxies,
-                timeout=20,
+                timeout=45,
                 verify=False
             )
-            print(f"DEBUG - Proxy test successful! Status code: {test_response.status_code}")
+            print(f"Proxy test OK (status {test_response.status_code})")
             return
         except Exception as test_error:
             wait = 2 ** attempt
