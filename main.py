@@ -297,6 +297,11 @@ def run_serp_collection(
     print(f"[{run_id}] Saving {len(serp_df):,} new SERP results...")
     serp_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
 
+    # Write SERP metadata to BigQuery immediately (before scraping) so results
+    # survive if the scraping stage crashes or times out.
+    n_written = storage.write_press_release_metadata(serp_df, run_id=run_id)
+    print(f"[{run_id}] Wrote {n_written} SERP metadata rows to BigQuery")
+
     return stats, serp_df
 
 
