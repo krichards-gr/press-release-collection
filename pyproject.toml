@@ -1,26 +1,40 @@
 [project]
 name = "press-release-collection"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Automated pipeline for collecting corporate press releases from Fortune 100 newsrooms"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "brightdata-sdk>=2.1.1",
-    "bs4>=0.0.2",
-    "cloudscraper>=1.2.71",
-    "db-dtypes>=1.4.4",
-    "functions-framework>=3.5.0",
-    "google-cloud-bigquery>=3.40.0",
-    "goose3>=3.1.21",
-    "lxml-html-clean>=0.4.3",
-    "newspaper3k>=0.2.8",
-    "nltk>=3.9.2",
-    "pandas>=3.0.0",
-    "pip>=26.0.1",
-    "pyarrow>=23.0.0",
-    "python-dotenv>=1.0.0",
-    "readability-lxml>=0.8.4.1",
+    # -- SERP collection (Bright Data proxy) --
+    "requests>=2.31.0",          # HTTP client for SERP proxy requests
+
+    # -- Article scraping (5-scraper fallback chain) --
+    "newspaper3k>=0.2.8",        # Scraper #1: fast general-purpose article extraction
+    "nltk>=3.9.2",               # Required by newspaper3k for sentence tokenization
+    "trafilatura>=2.0.0",        # Scraper #2: robust main-content extraction
+    "cloudscraper>=1.2.71",      # Bot protection bypass (used by trafilatura + readability)
+    "readability-lxml>=0.8.4.1", # Scraper #3: Mozilla's readability algorithm
+    "lxml-html-clean>=0.4.3",    # Required by readability-lxml
+    "goose3>=3.1.21",            # Scraper #4: alternative article extractor
+    "bs4>=0.0.2",                # HTML parsing (used by readability scraper)
+
+    # -- BigQuery storage --
+    "google-cloud-bigquery>=3.40.0",  # BigQuery client library
+    "db-dtypes>=1.4.4",               # BigQuery data type support
+    "pyarrow>=23.0.0",                # Required for load_table_from_dataframe
+
+    # -- Data processing --
+    "pandas>=3.0.0",             # DataFrames for pipeline data flow
+
+    # -- Cloud Run --
+    "functions-framework>=3.5.0", # Google Cloud Functions HTTP framework
+
+    # -- Configuration --
+    "python-dotenv>=1.0.0",      # Load .env file for local development
+
+    # -- UI --
+    "tqdm>=4.67.3",              # Progress bars for SERP collection and scraping
+
+    # -- Build tools (needed for some native dependencies) --
     "setuptools>=82.0.0",
-    "tqdm>=4.67.3",
-    "trafilatura>=2.0.0",
 ]

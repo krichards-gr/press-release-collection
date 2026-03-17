@@ -2,32 +2,46 @@
 BigQuery Storage Module
 ========================
 
-Manages BigQuery table operations for the press release collection pipeline.
+Manages ALL BigQuery table operations for the press release collection pipeline.
 
-Schema Design:
---------------
-1. press_release_metadata: One row per press release — SERP fields + company info (immutable)
-2. press_release_content:  One row per scraped release — article text, summary, keywords
-3. collection_runs:        Pipeline execution log — idempotency, backfill, run auditing
+Schema Design (3 tables):
+--------------------------
+1. press_release_metadata
+   - One row per press release found by SERP search.
+   - Contains: URL, title, description, SERP rank, company, sector, newsroom_url,
+     publish_date, and the query that found it.
+   - Immutable once inserted (except publish_date, which is backfilled after scraping).
+   - Partitioned by collection_timestamp (day), clustered by company + press_release_id.
 
-The metadata/content split mirrors the earnings-call-collector pattern:
-  earnings_call_transcript_metadata  ↔  press_release_metadata
-  earnings_call_transcript_content   ↔  press_release_content
+2. press_release_content
+   - One row per SUCCESSFULLY scraped press release.
+   - Contains: article_text and which scraper extracted it.
+   - Joined to metadata via press_release_id (MD5 of URL).
+   - Partitioned by collection_timestamp (day), clustered by press_release_id.
 
-press_release_id is a deterministic MD5(url) — the same URL always produces the same ID,
-enabling BigQuery-first deduplication before any SERP API calls are made.
+3. collection_runs
+   - One row per pipeline execution (both Cloud Run and CLI).
+   - Tracks date range, queries executed, counts, status, and timing.
+   - Powers idempotency: get_last_successful_run_end_date() tells the next
+     Cloud Run invocation where to start collecting from.
 
-Legacy:
--------
-collected_articles: Original combined table (pre-split). Still exists in BigQuery with
-historical data. No longer written to by this pipeline; use press_release_metadata
-+ press_release_content for all new writes and reads.
+ID Strategy:
+  press_release_id = MD5(url)
+  Same URL always produces the same ID, enabling idempotent inserts.
+  This mirrors the MD5(symbol + report_date) pattern in earnings-call-collector.
+
+Key Priority Metadata (per user requirements):
+  - company:  Identified by matching the site:url in the SERP query against
+              the benchmarking_corporate_reference table in BigQuery.
+  - sector:   Also from benchmarking_corporate_reference (flows through
+              reference_data.csv into the pipeline).
+  - publish_date: Extracted by the scraper from the article text/HTML/URL.
 """
 
 import hashlib
-import os
 from datetime import datetime
 from typing import Optional, List, Dict
+
 import pandas as pd
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
@@ -35,47 +49,69 @@ from google.cloud.exceptions import NotFound
 from config import config
 
 
-def _generate_press_release_id(url: str) -> str:
-    """Generate a deterministic press_release_id from a URL using MD5.
+# ---------------------------------------------------------------------------
+# Helper: deterministic press_release_id from URL
+# ---------------------------------------------------------------------------
 
-    Analogous to the MD5(symbol + report_date) ID used in earnings-call-collector.
-    Same URL always produces the same ID, enabling idempotent inserts.
+def _generate_press_release_id(url: str) -> str:
+    """
+    Generate a deterministic press_release_id from a URL using MD5.
+
+    This is the primary key linking press_release_metadata and
+    press_release_content tables. Same URL always produces the same ID,
+    so re-running the pipeline for the same articles is safe (idempotent).
+
+    Analogous to MD5(symbol + report_date) in earnings-call-collector.
     """
     return hashlib.md5(str(url).encode('utf-8')).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Main storage class
+# ---------------------------------------------------------------------------
+
 class BigQueryStorage:
-    """Handle all BigQuery operations for the pipeline."""
+    """
+    Handle all BigQuery operations for the press release collection pipeline.
+
+    Usage:
+        storage = BigQueryStorage()
+        storage.initialize_tables()       # Create tables if they don't exist
+        storage.write_press_release_metadata(df, run_id="...")
+        storage.write_press_release_content(df, run_id="...")
+    """
 
     def __init__(self, project_id: str = None, dataset_id: str = None):
         """
         Initialize BigQuery storage.
 
         Args:
-            project_id: GCP project ID (default: from environment)
-            dataset_id: BigQuery dataset ID (default: pressure_monitoring)
+            project_id: GCP project ID. Defaults to the project set in gcloud CLI
+                        or the service account's project.
+            dataset_id: BigQuery dataset name. Defaults to config.BIGQUERY_DATASET
+                        (usually "pressure_monitoring").
         """
         self.client = bigquery.Client(project=project_id)
         self.project_id = project_id or self.client.project
         self.dataset_id = dataset_id or config.BIGQUERY_DATASET
         self.dataset_ref = f"{self.project_id}.{self.dataset_id}"
 
-        # Ensure dataset exists
+        # Create the dataset if it doesn't exist yet (first-time setup)
         self._ensure_dataset_exists()
 
     def _ensure_dataset_exists(self):
-        """Create dataset if it doesn't exist."""
+        """Create the BigQuery dataset if it doesn't already exist."""
         try:
             self.client.get_dataset(self.dataset_ref)
-            print(f"✓ Using BigQuery dataset: {self.dataset_ref}")
+            print(f"Using BigQuery dataset: {self.dataset_ref}")
         except NotFound:
             dataset = bigquery.Dataset(self.dataset_ref)
             dataset.location = "US"
             dataset = self.client.create_dataset(dataset)
-            print(f"✓ Created BigQuery dataset: {self.dataset_ref}")
+            print(f"Created BigQuery dataset: {self.dataset_ref}")
 
     def _get_table_ref(self, table_name: str) -> str:
-        """Get fully qualified table reference."""
+        """Get fully qualified table reference (project.dataset.table)."""
         return f"{self.dataset_ref}.{table_name}"
 
     # =========================================================================
@@ -84,50 +120,82 @@ class BigQueryStorage:
 
     def create_press_release_metadata_table(self):
         """
-        Create table for press release metadata (SERP fields + company info).
+        Create the press_release_metadata table.
 
-        One row per press release. Immutable once collected.
-        Analogous to earnings_call_transcript_metadata in earnings-call-collector.
+        This table stores one row per press release discovered by SERP search.
+        It is the "wide" table containing all metadata about each press release.
 
-        Clustered by company for efficient per-company queries.
+        Key columns for the user's priority metadata:
+          - company:      Corporation name (e.g. "Apple Inc.")
+          - sector:       Industry sector (e.g. "Technology") from BQ reference table
+          - publish_date: Article publication date (backfilled after scraping)
+
+        Partitioned by collection_timestamp for efficient time-range queries.
+        Clustered by company (most common filter) then press_release_id.
         """
         table_id = self._get_table_ref("press_release_metadata")
 
         schema = [
-            # Deterministic ID (joins to press_release_content)
-            bigquery.SchemaField("press_release_id", "STRING", mode="REQUIRED",
-                                 description="MD5(url) — deterministic ID linking to content table"),
-            bigquery.SchemaField("url", "STRING", mode="REQUIRED",
-                                 description="Article URL"),
+            # -- Primary key (deterministic MD5 of URL) --
+            bigquery.SchemaField(
+                "press_release_id", "STRING", mode="REQUIRED",
+                description="MD5(url) -- deterministic ID linking to content table"
+            ),
+            bigquery.SchemaField(
+                "url", "STRING", mode="REQUIRED",
+                description="Full article URL"
+            ),
 
-            # SERP fields
-            bigquery.SchemaField("title", "STRING", mode="NULLABLE",
-                                 description="Article title (scraped page title when available, otherwise SERP title)"),
-            bigquery.SchemaField("description", "STRING", mode="NULLABLE",
-                                 description="Meta description from SERP"),
-            bigquery.SchemaField("rank", "INTEGER", mode="NULLABLE",
-                                 description="Search result rank position"),
-            bigquery.SchemaField("query", "STRING", mode="NULLABLE",
-                                 description="Full Google search query URL that found this article"),
+            # -- SERP fields (from Google search results) --
+            bigquery.SchemaField(
+                "title", "STRING", mode="NULLABLE",
+                description="Article title (scraped page title when available, else SERP title)"
+            ),
+            bigquery.SchemaField(
+                "description", "STRING", mode="NULLABLE",
+                description="Meta description snippet from SERP"
+            ),
+            bigquery.SchemaField(
+                "rank", "INTEGER", mode="NULLABLE",
+                description="Search result rank position (1 = top result)"
+            ),
+            bigquery.SchemaField(
+                "query", "STRING", mode="NULLABLE",
+                description="Full Google search query URL that found this article"
+            ),
 
-            # Company context
-            bigquery.SchemaField("company", "STRING", mode="NULLABLE",
-                                 description="Corporation name from reference data (e.g. Apple Inc.)"),
-            bigquery.SchemaField("newsroom_url", "STRING", mode="NULLABLE",
-                                 description="Newsroom base URL used in site: search (e.g. newsroom.apple.com)"),
+            # -- Company context (from benchmarking_corporate_reference) --
+            bigquery.SchemaField(
+                "company", "STRING", mode="NULLABLE",
+                description="Corporation name (e.g. 'Apple Inc.') from reference data"
+            ),
+            bigquery.SchemaField(
+                "sector", "STRING", mode="NULLABLE",
+                description="Industry sector (e.g. 'Technology') from reference data"
+            ),
+            bigquery.SchemaField(
+                "newsroom_url", "STRING", mode="NULLABLE",
+                description="Newsroom base URL used in site: search (e.g. newsroom.apple.com)"
+            ),
 
-            # Dates
-            bigquery.SchemaField("publish_date", "TIMESTAMP", mode="NULLABLE",
-                                 description="Article publication date (scraped where available)"),
-            bigquery.SchemaField("collection_timestamp", "TIMESTAMP", mode="REQUIRED",
-                                 description="When article was collected by this pipeline"),
-            bigquery.SchemaField("run_id", "STRING", mode="NULLABLE",
-                                 description="Pipeline run identifier (YYYYMMDD_HHMMSS)"),
+            # -- Dates --
+            bigquery.SchemaField(
+                "publish_date", "TIMESTAMP", mode="NULLABLE",
+                description="Article publication date (scraped from article when available)"
+            ),
+            bigquery.SchemaField(
+                "collection_timestamp", "TIMESTAMP", mode="REQUIRED",
+                description="When this article was collected by the pipeline"
+            ),
+            bigquery.SchemaField(
+                "run_id", "STRING", mode="NULLABLE",
+                description="Pipeline run identifier (YYYYMMDD_HHMMSS)"
+            ),
         ]
 
         table = bigquery.Table(table_id, schema=schema)
 
-        # Partition by collection date for efficient time-range queries
+        # Partition by day on collection_timestamp for efficient time-range queries
         table.time_partitioning = bigquery.TimePartitioning(
             type_=bigquery.TimePartitioningType.DAY,
             field="collection_timestamp"
@@ -138,42 +206,49 @@ class BigQueryStorage:
 
         try:
             self.client.get_table(table_id)
-            print(f"✓ Table exists: {table_id}")
+            print(f"Table exists: {table_id}")
         except NotFound:
             self.client.create_table(table)
-            print(f"✓ Created table: {table_id}")
+            print(f"Created table: {table_id}")
 
     def create_press_release_content_table(self):
         """
-        Create table for press release content (scraped article text).
+        Create the press_release_content table.
 
-        One row per successfully scraped press release.
-        Analogous to earnings_call_transcript_content in earnings-call-collector.
+        This table stores the actual scraped article text. Only rows where
+        scraping succeeded have entries here. Joined to metadata via
+        press_release_id.
 
-        Join to press_release_metadata on press_release_id.
+        This is a collection-only table: no summaries, no keywords, no analysis.
         """
         table_id = self._get_table_ref("press_release_content")
 
         schema = [
-            # Foreign key to metadata table
-            bigquery.SchemaField("press_release_id", "STRING", mode="REQUIRED",
-                                 description="MD5(url) — foreign key to press_release_metadata"),
+            # -- Foreign key to metadata table --
+            bigquery.SchemaField(
+                "press_release_id", "STRING", mode="REQUIRED",
+                description="MD5(url) -- foreign key to press_release_metadata"
+            ),
 
-            # Scraped content
-            bigquery.SchemaField("article_text", "STRING", mode="NULLABLE",
-                                 description="Full article text extracted by scraper"),
-            bigquery.SchemaField("summary", "STRING", mode="NULLABLE",
-                                 description="Auto-generated summary (newspaper3k NLP)"),
-            bigquery.SchemaField("keywords", "STRING", mode="NULLABLE",
-                                 description="Extracted keywords (comma-separated, newspaper3k NLP)"),
-            bigquery.SchemaField("scraper_used", "STRING", mode="NULLABLE",
-                                 description="Which scraper successfully extracted content"),
+            # -- Scraped content --
+            bigquery.SchemaField(
+                "article_text", "STRING", mode="NULLABLE",
+                description="Full article text extracted by the scraper"
+            ),
+            bigquery.SchemaField(
+                "scraper_used", "STRING", mode="NULLABLE",
+                description="Which scraper succeeded (newspaper3k, trafilatura, etc.)"
+            ),
 
-            # Metadata
-            bigquery.SchemaField("collection_timestamp", "TIMESTAMP", mode="REQUIRED",
-                                 description="When content was scraped"),
-            bigquery.SchemaField("run_id", "STRING", mode="NULLABLE",
-                                 description="Pipeline run identifier"),
+            # -- Metadata --
+            bigquery.SchemaField(
+                "collection_timestamp", "TIMESTAMP", mode="REQUIRED",
+                description="When content was scraped"
+            ),
+            bigquery.SchemaField(
+                "run_id", "STRING", mode="NULLABLE",
+                description="Pipeline run identifier"
+            ),
         ]
 
         table = bigquery.Table(table_id, schema=schema)
@@ -182,53 +257,82 @@ class BigQueryStorage:
             type_=bigquery.TimePartitioningType.DAY,
             field="collection_timestamp"
         )
-
         table.clustering_fields = ["press_release_id"]
 
         try:
             self.client.get_table(table_id)
-            print(f"✓ Table exists: {table_id}")
+            print(f"Table exists: {table_id}")
         except NotFound:
             self.client.create_table(table)
-            print(f"✓ Created table: {table_id}")
+            print(f"Created table: {table_id}")
 
     def create_collection_runs_table(self):
         """
-        Create table for tracking pipeline execution runs.
+        Create the collection_runs table.
 
-        This table enables idempotency by tracking what has been collected
-        and supports both query-level and URL-level deduplication.
+        This table logs every pipeline execution (both Cloud Run and CLI).
+        It enables two critical features:
 
-        Key use: get_last_successful_run_end_date() reads this table to
-        determine where the next daily run should start.
+        1. Auto date detection: get_last_successful_run_end_date() reads this
+           table to determine where the next Cloud Run invocation should start.
+           This means Cloud Run needs zero configuration -- it just picks up
+           where the last run left off.
+
+        2. Query-level deduplication: get_executed_queries_for_date_range()
+           checks which SERP queries have already been run for overlapping
+           date ranges, saving API costs by not re-running them.
         """
         table_id = self._get_table_ref("collection_runs")
 
         schema = [
-            bigquery.SchemaField("run_id", "STRING", mode="REQUIRED",
-                                 description="Unique run identifier (YYYYMMDD_HHMMSS)"),
-            bigquery.SchemaField("start_date", "DATE", mode="REQUIRED",
-                                 description="Start of date range collected"),
-            bigquery.SchemaField("end_date", "DATE", mode="REQUIRED",
-                                 description="End of date range collected"),
-            bigquery.SchemaField("companies_processed", "STRING", mode="REPEATED",
-                                 description="List of company identifiers processed"),
-            bigquery.SchemaField("queries_executed", "STRING", mode="REPEATED",
-                                 description="List of search queries executed (for SERP API deduplication)"),
-            bigquery.SchemaField("queries_count", "INTEGER", mode="NULLABLE",
-                                 description="Number of queries executed"),
-            bigquery.SchemaField("urls_collected", "INTEGER", mode="NULLABLE",
-                                 description="Number of URLs collected"),
-            bigquery.SchemaField("articles_scraped", "INTEGER", mode="NULLABLE",
-                                 description="Number of articles successfully scraped"),
-            bigquery.SchemaField("status", "STRING", mode="REQUIRED",
-                                 description="Run status: started, completed, failed"),
-            bigquery.SchemaField("start_timestamp", "TIMESTAMP", mode="REQUIRED",
-                                 description="When run started"),
-            bigquery.SchemaField("end_timestamp", "TIMESTAMP", mode="NULLABLE",
-                                 description="When run completed/failed"),
-            bigquery.SchemaField("error_message", "STRING", mode="NULLABLE",
-                                 description="Error message if failed"),
+            bigquery.SchemaField(
+                "run_id", "STRING", mode="REQUIRED",
+                description="Unique run identifier (YYYYMMDD_HHMMSS)"
+            ),
+            bigquery.SchemaField(
+                "start_date", "DATE", mode="REQUIRED",
+                description="Start of the date range collected"
+            ),
+            bigquery.SchemaField(
+                "end_date", "DATE", mode="REQUIRED",
+                description="End of the date range collected"
+            ),
+            bigquery.SchemaField(
+                "companies_processed", "STRING", mode="REPEATED",
+                description="List of company names processed in this run"
+            ),
+            bigquery.SchemaField(
+                "queries_executed", "STRING", mode="REPEATED",
+                description="List of SERP query URLs executed (for query-level dedup)"
+            ),
+            bigquery.SchemaField(
+                "queries_count", "INTEGER", mode="NULLABLE",
+                description="Number of queries executed"
+            ),
+            bigquery.SchemaField(
+                "urls_collected", "INTEGER", mode="NULLABLE",
+                description="Number of unique URLs collected from SERP"
+            ),
+            bigquery.SchemaField(
+                "articles_scraped", "INTEGER", mode="NULLABLE",
+                description="Number of articles successfully scraped"
+            ),
+            bigquery.SchemaField(
+                "status", "STRING", mode="REQUIRED",
+                description="Run status: 'started', 'completed', or 'failed'"
+            ),
+            bigquery.SchemaField(
+                "start_timestamp", "TIMESTAMP", mode="REQUIRED",
+                description="When the pipeline run started"
+            ),
+            bigquery.SchemaField(
+                "end_timestamp", "TIMESTAMP", mode="NULLABLE",
+                description="When the pipeline run completed or failed"
+            ),
+            bigquery.SchemaField(
+                "error_message", "STRING", mode="NULLABLE",
+                description="Error message if the run failed"
+            ),
         ]
 
         table = bigquery.Table(table_id, schema=schema)
@@ -240,53 +344,19 @@ class BigQueryStorage:
 
         try:
             self.client.get_table(table_id)
-            print(f"✓ Table exists: {table_id}")
+            print(f"Table exists: {table_id}")
         except NotFound:
             self.client.create_table(table)
-            print(f"✓ Created table: {table_id}")
-
-    def create_collected_articles_table(self):
-        """
-        [LEGACY] Create the original combined collected_articles table.
-
-        This table is no longer written to by the pipeline. New data goes to
-        press_release_metadata + press_release_content. Historical data in this
-        table is preserved and can still be queried.
-        """
-        table_id = self._get_table_ref("collected_articles")
-
-        schema = [
-            bigquery.SchemaField("url", "STRING", mode="REQUIRED"),
-            bigquery.SchemaField("title", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("description", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("rank", "INTEGER", mode="NULLABLE"),
-            bigquery.SchemaField("query", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("article_text", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("summary", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("keywords", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("publish_date", "TIMESTAMP", mode="NULLABLE"),
-            bigquery.SchemaField("scraper_used", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("collection_timestamp", "TIMESTAMP", mode="REQUIRED"),
-            bigquery.SchemaField("run_id", "STRING", mode="NULLABLE"),
-        ]
-
-        table = bigquery.Table(table_id, schema=schema)
-        table.time_partitioning = bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY,
-            field="collection_timestamp"
-        )
-        table.clustering_fields = ["url"]
-
-        try:
-            self.client.get_table(table_id)
-            print(f"✓ Table exists: {table_id}")
-        except NotFound:
-            self.client.create_table(table)
-            print(f"✓ Created table: {table_id}")
+            print(f"Created table: {table_id}")
 
     def initialize_tables(self):
-        """Create all required tables if they don't already exist."""
-        print("\n📊 Initializing BigQuery tables...")
+        """
+        Create all required tables if they don't already exist.
+
+        Safe to call on every run -- existing tables are left untouched.
+        Called at the start of both Cloud Run and CLI pipelines.
+        """
+        print("\nInitializing BigQuery tables...")
         self.create_press_release_metadata_table()
         self.create_press_release_content_table()
         self.create_collection_runs_table()
@@ -301,24 +371,23 @@ class BigQueryStorage:
         Load press_release_ids that have been fully scraped (have a row in
         press_release_content).
 
-        Used for URL-level deduplication BEFORE writing new records — prevents
-        paying to re-scrape articles that already have content in the database.
+        Used for URL-level deduplication BEFORE writing new records. This
+        prevents paying to re-scrape articles that already have content.
 
-        Intentionally checks press_release_content rather than
-        press_release_metadata: a URL that was discovered (metadata written) but
-        never successfully scraped (no content row) is NOT considered done, so it
-        will be retried on the next run rather than silently skipped forever.
+        Why check content table, not metadata?
+          A URL that was discovered (metadata written) but never successfully
+          scraped (no content row) should be RETRIED on the next run, not
+          silently skipped forever.
 
         Returns:
-            Set of press_release_id strings that already have scraped content.
-            Returns empty set on first run or if table doesn't exist.
+            Set of press_release_id strings. Empty set on first run.
         """
         table_id = self._get_table_ref("press_release_content")
 
         try:
             self.client.get_table(table_id)
         except NotFound:
-            print("📝 press_release_content table not found (first run) — no existing IDs")
+            print("press_release_content table not found (first run) -- no existing IDs")
             return set()
 
         query = f"SELECT press_release_id FROM `{table_id}`"
@@ -326,22 +395,23 @@ class BigQueryStorage:
         try:
             results = self.client.query(query).result()
             ids = {row.press_release_id for row in results}
-            print(f"📝 Loaded {len(ids):,} existing press release IDs from BigQuery")
+            print(f"Loaded {len(ids):,} existing press release IDs from BigQuery")
             return ids
         except Exception as e:
-            print(f"⚠️  Error loading existing press release IDs: {e}")
+            print(f"Warning: Error loading existing IDs: {e}")
             return set()
 
     def get_last_successful_run_end_date(self) -> Optional[str]:
         """
         Get the end_date from the most recently completed pipeline run.
 
-        This is the primary mechanism for daily scheduling without hardcoded dates:
-        the next run starts from this date (with a 1-day overlap for safety).
+        This is the PRIMARY mechanism for daily scheduling without hardcoded dates:
+        Cloud Run calls this to figure out where to start collecting from.
+        The next run starts from this date (with 1-day overlap for safety).
 
         Returns:
-            Date string 'YYYY-MM-DD' of the last completed run's end_date,
-            or None if no completed runs exist (e.g. first ever run).
+            Date string 'YYYY-MM-DD', or None if no completed runs exist
+            (e.g. first ever run).
         """
         table_id = self._get_table_ref("collection_runs")
 
@@ -358,24 +428,25 @@ class BigQueryStorage:
             results = list(self.client.query(query).result())
             if results:
                 end_date = results[0].end_date_str
-                print(f"📅 Last successful run covered up to: {end_date}")
+                print(f"Last successful run covered up to: {end_date}")
                 return end_date
-            print("📅 No completed runs found in collection_runs (first run or all failed)")
+            print("No completed runs found (first run or all failed)")
             return None
         except NotFound:
-            print("📅 collection_runs table not found (first run)")
+            print("collection_runs table not found (first run)")
             return None
         except Exception as e:
-            print(f"⚠️  Error getting last run end date: {e}")
+            print(f"Warning: Error getting last run end date: {e}")
             return None
 
     def get_collected_newsroom_urls(self) -> set:
         """
         Get all newsroom base URLs that have ever been collected.
 
-        Used to detect truly new newsrooms that need historical backfill,
-        replacing the broken previous approach that compared newsroom URLs
-        against article URLs (they never matched).
+        Used to detect NEW newsrooms that need historical backfill.
+        When a new company is added to the reference data, the pipeline
+        detects it here and backfills from a historical start date
+        (rather than only collecting from the current run's start date).
 
         Returns:
             Set of newsroom_url strings (e.g. {'newsroom.apple.com', ...})
@@ -391,41 +462,45 @@ class BigQueryStorage:
         try:
             results = self.client.query(query).result()
             urls = {row.newsroom_url for row in results}
-            print(f"📝 Found {len(urls):,} newsroom URLs previously collected")
+            print(f"Found {len(urls):,} newsroom URLs previously collected")
             return urls
         except NotFound:
-            print("📝 press_release_metadata table not found — no previously collected newsrooms")
+            print("press_release_metadata table not found -- no previously collected newsrooms")
             return set()
         except Exception as e:
-            print(f"⚠️  Error getting collected newsroom URLs: {e}")
+            print(f"Warning: Error getting collected newsroom URLs: {e}")
             return set()
 
     # =========================================================================
-    # WRITE METHODS (new split-table approach)
+    # WRITE METHODS
     # =========================================================================
 
-    def write_press_release_metadata(self, df: pd.DataFrame, run_id: str = None) -> int:
+    def write_press_release_metadata(self, df: pd.DataFrame,
+                                     run_id: str = None) -> int:
         """
         Write press release metadata to BigQuery (press_release_metadata table).
 
-        Analogous to insert_metadata_bq() in earnings-call-collector.
-        One row per press release. Append-only; never updated after insertion.
+        One row per press release. Append-only; never updated after insertion
+        (except publish_date, which is backfilled by update_metadata_publish_dates).
+
+        Before writing, checks for existing press_release_ids in the metadata
+        table and skips duplicates to prevent double-counting.
 
         Expected DataFrame columns (extras are ignored):
             Required: url (or press_release_id already set)
             SERP:     title, description, rank, query
-            Company:  company, newsroom_url
+            Company:  company, sector, newsroom_url
             Date:     publish_date
 
         Args:
-            df:     DataFrame with press release metadata
-            run_id: Optional run identifier
+            df:     DataFrame with press release metadata.
+            run_id: Pipeline run identifier (YYYYMMDD_HHMMSS).
 
         Returns:
             Number of rows written.
         """
         if df.empty:
-            print("⚠️  No press release metadata to write")
+            print("No press release metadata to write")
             return 0
 
         table_id = self._get_table_ref("press_release_metadata")
@@ -433,7 +508,7 @@ class BigQueryStorage:
         df['collection_timestamp'] = datetime.utcnow()
         df['run_id'] = run_id
 
-        # Normalise url column name
+        # Normalize the URL column name (SERP module uses 'link')
         if 'url' not in df.columns and 'link' in df.columns:
             df = df.rename(columns={'link': 'url'})
 
@@ -441,55 +516,61 @@ class BigQueryStorage:
         if 'press_release_id' not in df.columns:
             df['press_release_id'] = df['url'].apply(_generate_press_release_id)
 
-        # Skip IDs already in press_release_metadata to prevent duplicate rows.
-        # This is needed because get_existing_press_release_ids() now checks
-        # press_release_content, so URLs discovered but never scraped will
-        # pass SERP dedup and reach here a second time.
+        # -- Dedup against existing metadata rows --
+        # This prevents duplicate rows when the same URL is discovered
+        # across multiple runs or overlapping date ranges.
         try:
             existing_query = f"SELECT press_release_id FROM `{table_id}`"
-            existing_meta_ids = {row.press_release_id
-                                 for row in self.client.query(existing_query).result()}
+            existing_meta_ids = {
+                row.press_release_id
+                for row in self.client.query(existing_query).result()
+            }
             if existing_meta_ids:
                 before = len(df)
                 df = df[~df['press_release_id'].isin(existing_meta_ids)]
                 skipped = before - len(df)
                 if skipped:
-                    print(f"📝 Skipped {skipped:,} metadata rows already in BigQuery")
+                    print(f"Skipped {skipped:,} metadata rows already in BigQuery")
         except Exception as e:
-            print(f"⚠️  Could not check existing metadata IDs: {e} — proceeding anyway")
+            print(f"Warning: Could not check existing metadata IDs: {e} -- proceeding anyway")
 
         if df.empty:
-            print("⚠️  No new press release metadata to write")
+            print("No new press release metadata to write")
             return 0
 
-        # Convert publish_date to datetime if present
+        # Convert publish_date to datetime (handles various string formats)
         if 'publish_date' in df.columns:
             df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
 
+        # Only write columns that match the table schema
         schema_columns = [
             'press_release_id', 'url', 'title', 'description', 'rank', 'query',
-            'company', 'newsroom_url', 'publish_date', 'collection_timestamp', 'run_id'
+            'company', 'sector', 'newsroom_url', 'publish_date',
+            'collection_timestamp', 'run_id'
         ]
         df_to_write = df[[col for col in schema_columns if col in df.columns]]
 
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         )
-        job = self.client.load_table_from_dataframe(df_to_write, table_id, job_config=job_config)
-        job.result()
+        job = self.client.load_table_from_dataframe(
+            df_to_write, table_id, job_config=job_config
+        )
+        job.result()  # Wait for the load job to complete
 
-        print(f"✓ Wrote {len(df_to_write):,} rows to press_release_metadata: {table_id}")
+        print(f"Wrote {len(df_to_write):,} rows to press_release_metadata")
         return len(df_to_write)
 
     def update_metadata_publish_dates(self, df: pd.DataFrame) -> int:
         """
-        Update publish_date on existing press_release_metadata rows.
+        Update publish_date on existing metadata rows.
 
-        Called after scraping, which extracts publish dates that were not
-        available in the original SERP results.
+        Called AFTER scraping, because scrapers extract publish dates that
+        were not available in the original SERP results. Only updates rows
+        where publish_date is currently NULL (doesn't overwrite existing dates).
 
         Args:
-            df: DataFrame with at least 'press_release_id' and 'publish_date' columns.
+            df: DataFrame with at least 'press_release_id' and 'publish_date'.
 
         Returns:
             Number of rows updated.
@@ -500,7 +581,7 @@ class BigQueryStorage:
         df = df.copy()
         df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
 
-        # Only rows that actually have a scraped publish_date
+        # Only process rows that actually have a scraped publish_date
         has_date = df[df['publish_date'].notna()].copy()
         if has_date.empty:
             return 0
@@ -508,6 +589,9 @@ class BigQueryStorage:
         table_id = self._get_table_ref("press_release_metadata")
         updated = 0
 
+        # Update each row individually (BQ doesn't support batch UPDATE easily).
+        # Only sets publish_date where it's currently NULL to avoid overwriting
+        # any manually-corrected dates.
         for _, row in has_date.iterrows():
             pid = row['press_release_id']
             ts = row['publish_date'].strftime('%Y-%m-%d %H:%M:%S')
@@ -521,32 +605,30 @@ class BigQueryStorage:
                 result = self.client.query(query).result()
                 updated += result.num_dml_affected_rows or 0
             except Exception:
-                pass  # best-effort
+                pass  # Best-effort: don't fail the pipeline over a date update
 
         if updated:
-            print(f"✓ Updated publish_date on {updated:,} metadata rows")
+            print(f"Updated publish_date on {updated:,} metadata rows")
         return updated
 
-    def write_press_release_content(self, df: pd.DataFrame, run_id: str = None) -> int:
+    def write_press_release_content(self, df: pd.DataFrame,
+                                    run_id: str = None) -> int:
         """
         Write press release content to BigQuery (press_release_content table).
 
-        Analogous to insert_content_bq() in earnings-call-collector.
-        Only rows where article_text is non-empty are written.
-
-        Expected DataFrame columns (extras are ignored):
-            Required: press_release_id (or url, from which ID is derived)
-            Content:  article_text, summary, keywords, scraper_used
+        Only writes rows where article_text is non-empty. This table stores
+        the actual scraped article text -- no summaries, no keywords, just
+        the raw collected text and which scraper extracted it.
 
         Args:
-            df:     DataFrame with scraped article content
-            run_id: Optional run identifier
+            df:     DataFrame with scraped article content.
+            run_id: Pipeline run identifier.
 
         Returns:
             Number of rows written.
         """
         if df.empty:
-            print("⚠️  No press release content to write")
+            print("No press release content to write")
             return 0
 
         table_id = self._get_table_ref("press_release_content")
@@ -554,34 +636,37 @@ class BigQueryStorage:
         df['collection_timestamp'] = datetime.utcnow()
         df['run_id'] = run_id
 
-        # Derive press_release_id from url if not already present
+        # Derive press_release_id from URL if not already present
         if 'press_release_id' not in df.columns:
             if 'url' in df.columns:
                 df['press_release_id'] = df['url'].apply(_generate_press_release_id)
             else:
                 raise ValueError("DataFrame must have 'press_release_id' or 'url' column")
 
-        # Only write rows with actual scraped content
+        # Only write rows that actually have scraped content
         has_content = df['article_text'].notna() & (df['article_text'].str.strip() != '')
         df = df[has_content]
 
         if df.empty:
-            print("⚠️  No scraped content to write (all article_text values are empty/null)")
+            print("No scraped content to write (all article_text values are empty/null)")
             return 0
 
+        # Only write columns that match the table schema (no summary/keywords)
         schema_columns = [
-            'press_release_id', 'article_text', 'summary', 'keywords',
-            'scraper_used', 'collection_timestamp', 'run_id'
+            'press_release_id', 'article_text', 'scraper_used',
+            'collection_timestamp', 'run_id'
         ]
         df_to_write = df[[col for col in schema_columns if col in df.columns]]
 
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         )
-        job = self.client.load_table_from_dataframe(df_to_write, table_id, job_config=job_config)
+        job = self.client.load_table_from_dataframe(
+            df_to_write, table_id, job_config=job_config
+        )
         job.result()
 
-        print(f"✓ Wrote {len(df_to_write):,} rows to press_release_content: {table_id}")
+        print(f"Wrote {len(df_to_write):,} rows to press_release_content")
         return len(df_to_write)
 
     # =========================================================================
@@ -591,13 +676,17 @@ class BigQueryStorage:
     def log_run_start(self, run_id: str, start_date: str, end_date: str,
                       companies: List[str] = None) -> None:
         """
-        Log the start of a collection run.
+        Log the START of a pipeline run.
+
+        Called at the beginning of both Cloud Run and CLI pipelines.
+        The run status is set to 'started' and will be updated to
+        'completed' or 'failed' by log_run_completion().
 
         Args:
-            run_id:     Unique run identifier
-            start_date: Start date (YYYY-MM-DD)
-            end_date:   End date (YYYY-MM-DD)
-            companies:  List of company identifiers being processed
+            run_id:     Unique run identifier (YYYYMMDD_HHMMSS).
+            start_date: Start of the date range being collected (YYYY-MM-DD).
+            end_date:   End of the date range being collected (YYYY-MM-DD).
+            companies:  List of company names being processed.
         """
         table_id = self._get_table_ref("collection_runs")
 
@@ -618,36 +707,39 @@ class BigQueryStorage:
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         )
-
         job = self.client.load_table_from_dataframe(df, table_id, job_config=job_config)
         job.result()
-        print(f"✓ Logged run start: {run_id}")
+        print(f"Logged run start: {run_id}")
 
     def log_run_completion(self, run_id: str, urls_collected: int = 0,
                            articles_scraped: int = 0,
                            queries_executed: List[str] = None,
                            error_message: str = None) -> None:
         """
-        Update a collection run with completion status.
+        Update a pipeline run with completion status.
+
+        Called at the end of both Cloud Run and CLI pipelines (whether
+        the run succeeded or failed). Updates the row created by log_run_start().
 
         Args:
-            run_id:            Unique run identifier
-            urls_collected:    Number of URLs collected
-            articles_scraped:  Number of articles scraped
-            queries_executed:  List of query strings that were executed
-            error_message:     Error message if failed
+            run_id:           Unique run identifier.
+            urls_collected:   Number of unique URLs collected from SERP.
+            articles_scraped: Number of articles successfully scraped.
+            queries_executed: List of SERP query URLs that were executed.
+            error_message:    Error message if the run failed (None = success).
         """
         table_id = self._get_table_ref("collection_runs")
 
         status = 'failed' if error_message else 'completed'
 
-        # Prepare queries array for SQL
+        # Build the queries array for the SQL UPDATE statement
         queries_array = 'NULL'
         queries_count = 0
         if queries_executed:
             queries_count = len(queries_executed)
-            escaped_queries = [q.replace("'", "\\'") for q in queries_executed]
-            queries_array = '[' + ','.join([f"'{q}'" for q in escaped_queries]) + ']'
+            # Escape single quotes in query strings to prevent SQL injection
+            escaped = [q.replace("'", "\\'") for q in queries_executed]
+            queries_array = '[' + ','.join([f"'{q}'" for q in escaped]) + ']'
 
         query = f"""
             UPDATE `{table_id}`
@@ -663,26 +755,31 @@ class BigQueryStorage:
         """
 
         self.client.query(query).result()
-        print(f"✓ Logged run completion: {run_id} ({status})")
+        print(f"Logged run completion: {run_id} ({status})")
 
     # =========================================================================
-    # QUERY-LEVEL DEDUPLICATION (SERP API cost savings)
+    # QUERY-LEVEL DEDUPLICATION (saves SERP API costs)
     # =========================================================================
 
-    def get_executed_queries_for_date_range(self, start_date: str, end_date: str) -> set:
+    def get_executed_queries_for_date_range(self, start_date: str,
+                                            end_date: str) -> set:
         """
-        Get search queries already executed for overlapping date ranges.
+        Get SERP queries already executed for overlapping date ranges.
 
-        Enables query-level deduplication BEFORE hitting the SERP API,
-        preventing unnecessary API costs. Checked in run_serp_collection()
-        as the first line of defence against redundant work.
+        This is the FIRST line of defense against redundant SERP API calls.
+        Before sending a query to Bright Data (which costs money), we check
+        if that exact query was already executed in a recent completed run
+        that covered an overlapping date range.
+
+        Only looks back 90 days to keep the query fast and avoid matching
+        very old runs whose data may be stale.
 
         Args:
-            start_date: Start date (YYYY-MM-DD)
-            end_date:   End date (YYYY-MM-DD)
+            start_date: Start date (YYYY-MM-DD).
+            end_date:   End date (YYYY-MM-DD).
 
         Returns:
-            Set of query strings already executed that overlap with this date range.
+            Set of query URL strings already executed for overlapping ranges.
         """
         table_id = self._get_table_ref("collection_runs")
 
@@ -699,47 +796,29 @@ class BigQueryStorage:
         try:
             results = self.client.query(query).result(timeout=60)
             queries = {row.query for row in results}
-            print(f"📝 Found {len(queries):,} queries already executed for overlapping date ranges")
+            print(f"Found {len(queries):,} queries already executed for overlapping ranges")
             return queries
         except NotFound:
-            print(f"⚠️  Table not found: {table_id} (first run)")
+            print(f"Table not found: {table_id} (first run)")
             return set()
         except Exception as e:
-            print(f"⚠️  Error checking executed queries: {e}")
+            print(f"Warning: Error checking executed queries: {e}")
             return set()
 
     # =========================================================================
-    # BACKFILL / URL CHECKS
+    # UTILITY QUERIES
     # =========================================================================
 
-    def identify_urls_needing_backfill(self, current_urls: List[str],
-                                        backfill_start_date: str = "2026-01-01") -> Dict[str, str]:
+    def get_collected_urls_for_date_range(self, start_date: str,
+                                          end_date: str) -> set:
         """
-        [LEGACY] Identify newsroom URLs that are new and need historical backfill.
+        Get URLs already collected within a specific date range.
 
-        Previously compared newsroom URLs against article URLs (a bug — they never
-        matched). Use get_collected_newsroom_urls() + set difference instead, which
-        is what run_serp_collection() now does directly.
-
-        Kept for backwards compatibility only.
-        """
-        collected_newsrooms = self.get_collected_newsroom_urls()
-        new_urls = set(current_urls) - collected_newsrooms
-
-        if new_urls:
-            print(f"🆕 Found {len(new_urls)} new newsrooms needing backfill from {backfill_start_date}")
-            return {url: backfill_start_date for url in new_urls}
-        else:
-            print("✓ No new newsrooms needing backfill")
-            return {}
-
-    def get_collected_urls_for_date_range(self, start_date: str, end_date: str) -> set:
-        """
-        Get URLs already collected in a specific date range (by collection timestamp).
+        Useful for manual dedup checks and debugging.
 
         Args:
-            start_date: Start date (YYYY-MM-DD)
-            end_date:   End date (YYYY-MM-DD)
+            start_date: Start date (YYYY-MM-DD).
+            end_date:   End date (YYYY-MM-DD).
 
         Returns:
             Set of URLs already collected.
@@ -756,18 +835,18 @@ class BigQueryStorage:
         try:
             results = self.client.query(query).result()
             urls = {row.url for row in results}
-            print(f"📝 Found {len(urls):,} URLs already collected for {start_date} to {end_date}")
+            print(f"Found {len(urls):,} URLs collected for {start_date} to {end_date}")
             return urls
         except Exception as e:
-            print(f"⚠️  Error checking collected URLs: {e}")
+            print(f"Warning: Error checking collected URLs: {e}")
             return set()
 
     def get_all_collected_urls(self) -> set:
         """
-        Get all URLs that have ever been collected (from press_release_metadata).
+        Get ALL URLs ever collected (from press_release_metadata).
 
         Returns:
-            Set of all collected URLs.
+            Set of all collected URL strings.
         """
         table_id = self._get_table_ref("press_release_metadata")
 
@@ -776,98 +855,57 @@ class BigQueryStorage:
         try:
             results = self.client.query(query).result()
             urls = {row.url for row in results}
-            print(f"📝 Found {len(urls):,} total URLs in press_release_metadata")
+            print(f"Found {len(urls):,} total URLs in press_release_metadata")
             return urls
         except NotFound:
-            print(f"⚠️  Table not found: {table_id} (first run)")
+            print(f"Table not found: {table_id} (first run)")
             return set()
         except Exception as e:
-            print(f"⚠️  Error checking collected URLs: {e}")
+            print(f"Warning: Error checking collected URLs: {e}")
             return set()
 
     def get_processed_urls(self, days_back: int = 30) -> set:
         """
         Get URLs collected in the last N days.
 
+        Useful for quick recency checks without scanning the full table.
+
         Args:
-            days_back: Number of days to look back
+            days_back: Number of days to look back.
 
         Returns:
-            Set of processed URLs.
+            Set of URL strings.
         """
         table_id = self._get_table_ref("press_release_metadata")
 
         query = f"""
             SELECT DISTINCT url
             FROM `{table_id}`
-            WHERE collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days_back} DAY)
+            WHERE collection_timestamp >= TIMESTAMP_SUB(
+                CURRENT_TIMESTAMP(), INTERVAL {days_back} DAY
+            )
         """
 
         try:
             results = self.client.query(query).result()
             urls = {row.url for row in results}
-            print(f"📝 Found {len(urls):,} processed URLs from last {days_back} days")
+            print(f"Found {len(urls):,} URLs from last {days_back} days")
             return urls
         except NotFound:
-            print(f"⚠️  Table not found: {table_id}")
+            print(f"Table not found: {table_id}")
             return set()
 
-    # =========================================================================
-    # LEGACY: write_collected_articles (no longer called by pipeline)
-    # =========================================================================
 
-    def write_collected_articles(self, df: pd.DataFrame, run_id: str = None) -> int:
-        """
-        [LEGACY] Write to the original combined collected_articles table.
-
-        This method is no longer called by the pipeline. New data is written to
-        press_release_metadata + press_release_content instead. Kept here so
-        any external scripts referencing this method do not break.
-        """
-        if df.empty:
-            print("⚠️  No articles to write")
-            return 0
-
-        table_id = self._get_table_ref("collected_articles")
-
-        df = df.copy()
-        df['collection_timestamp'] = datetime.utcnow()
-        df['run_id'] = run_id
-
-        if 'url' not in df.columns:
-            if 'link' in df.columns:
-                df = df.rename(columns={'link': 'url'})
-            else:
-                raise ValueError("DataFrame must have 'url' or 'link' column")
-
-        if 'publish_date' in df.columns:
-            df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
-
-        schema_columns = [
-            'url', 'title', 'description', 'rank', 'query',
-            'article_text', 'summary', 'keywords', 'publish_date', 'scraper_used',
-            'collection_timestamp', 'run_id'
-        ]
-        df_to_write = df[[col for col in schema_columns if col in df.columns]]
-
-        job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        )
-
-        job = self.client.load_table_from_dataframe(df_to_write, table_id, job_config=job_config)
-        job.result()
-
-        print(f"✓ [LEGACY] Wrote {len(df_to_write):,} collected articles to BigQuery: {table_id}")
-        return len(df_to_write)
-
+# ---------------------------------------------------------------------------
+# Standalone smoke test
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Smoke test: create tables and verify they exist
     storage = BigQueryStorage()
     storage.initialize_tables()
 
-    print("\n✅ BigQuery storage initialisation complete")
+    print("\nBigQuery storage initialization complete")
     print("Tables created/verified:")
-    print("  • press_release_metadata  (one row per press release)")
-    print("  • press_release_content   (scraped text for each release)")
-    print("  • collection_runs         (pipeline run log)")
+    print("  - press_release_metadata  (one row per press release)")
+    print("  - press_release_content   (scraped text for each release)")
+    print("  - collection_runs         (pipeline run log)")
