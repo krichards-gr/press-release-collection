@@ -3,17 +3,16 @@ Comprehensive Coverage Collector - Article Content Scraper Module
 ==================================================================
 
 This module extracts full article content from URLs collected by the SERP module.
-It enhances the basic SERP data with full text, summaries, keywords, and sentiment.
+It enhances the basic SERP data with full text, summaries, and keywords.
 
 Workflow:
 ---------
 1. Reads CSV with article URLs from SERP collection
 2. Downloads and parses each article using multi-scraper fallback chain (with concurrent processing)
 3. Applies NLP to extract keywords and generate summaries
-4. Performs sentiment analysis using spaCy + asent
-5. Joins scraped content with original SERP metadata; scraped title replaces
+4. Joins scraped content with original SERP metadata; scraped title replaces
    the SERP title where available (SERP titles are often truncated)
-6. Outputs enriched article data and detailed execution report
+5. Outputs article data and detailed execution report
 
 Input Required:
 ---------------
@@ -23,14 +22,11 @@ Input Required:
 Output:
 -------
 - f100_joined.csv: Joined SERP data with scraped content
-- enriched.csv: Final enriched data with sentiment analysis
 - scraper_errors.csv: Detailed error log for failed URLs
 
 Dependencies:
 -------------
 - newspaper3k: Article extraction and NLP
-- spacy: NLP pipeline (requires en_core_web_lg model)
-- asent: Rule-based sentiment analysis for spaCy
 - nltk: Natural language toolkit (punkt tokenizer)
 - beautifulsoup4: HTML parsing (used by newspaper)
 
@@ -64,9 +60,6 @@ nltk.download('punkt_tab', quiet=True)
 
 import pandas as pd
 from tqdm import tqdm
-import spacy
-import asent
-
 # Alternative scrapers for fallback chain
 import cloudscraper  # Bypasses Cloudflare and other bot protection
 import trafilatura  # Robust content extraction
@@ -670,62 +663,5 @@ if __name__ == "__main__":
     else:
         print("   ⚠ No articles successfully scraped!")
         joined = results_df
-    # =============================================================================
-    # SENTIMENT ANALYSIS
-    # =============================================================================
-
-    print("\n🔍 Running sentiment analysis...")
-
-    # Initialize spaCy with large English model for better accuracy
-    nlp = spacy.load("en_core_web_lg")
-    nlp.add_pipe('sentencizer')  # Add sentence boundary detection
-
-    # Add asent rule-based sentiment analysis component
-    # asent uses a lexicon approach similar to VADER
-    nlp.add_pipe('asent_en_v1')
-
-    def get_sentiment(text):
-        """
-        Analyze text sentiment using spaCy + asent.
-
-        The polarity score from asent ranges from -1 (most negative) to +1 (most positive).
-        We use thresholds of ±0.1 to classify text as positive/negative/neutral.
-
-        Args:
-            text: String content to analyze (typically article description or full text)
-
-        Returns:
-            tuple: (label, score) where label is 'positive'/'negative'/'neutral'
-                   and score is the raw polarity float
-        """
-        if pd.isna(text) or text == '':
-            return 'neutral', 0.0
-
-        try:
-            doc = nlp(str(text))
-            polarity = doc._.polarity.compound
-
-            # Classification thresholds (adjust based on validation results)
-            if polarity > 0.1:
-                label = 'positive'
-            elif polarity < -0.1:
-                label = 'negative'
-            else:
-                label = 'neutral'
-            return label, round(float(polarity), 4)
-        except:
-            return 'neutral', 0.0
-
-    # Apply sentiment analysis to article descriptions
-    # Note: Using description rather than full text for speed
-    tqdm.pandas(desc="Analyzing Sentiment")
-    sentiment_results = joined['description'].progress_apply(get_sentiment)
-    joined['sentiment'] = sentiment_results.apply(lambda x: x[0])
-    joined['sentiment_score'] = sentiment_results.apply(lambda x: x[1])
-
-    # Write enriched data to CSV
-    joined.to_csv(config.ENRICHED_RESULTS_FILE, index=False)
-    print(f"   ✓ Saved enriched data to {config.ENRICHED_RESULTS_FILE}")
-
     print("\n✅ Article scraping complete!")
     print("="*80 + "\n")

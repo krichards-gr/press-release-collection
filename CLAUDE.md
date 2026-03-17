@@ -13,7 +13,6 @@ Automated pipeline for collecting corporate press releases from Fortune 100 comp
 uv sync
 
 # Download required NLP models
-python -m spacy download en_core_web_lg
 python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
 
 # Run pipeline locally (CLI)
@@ -22,6 +21,7 @@ python main_cli.py --start-date 2026-01-01 --end-date 2026-01-31
 python main_cli.py --incremental    # auto-detect dates from last run
 python main_cli.py --last-n-days 7
 python main_cli.py --skip-scraping  # SERP only, no article scraping
+python main_cli.py --write-to-bigquery  # populate BQ like Cloud Run does
 
 # Run tests
 python -m pytest tests/
@@ -42,12 +42,10 @@ powershell scripts/deploy.ps1  # Windows
 2. `generate_queries.py` — Builds Bright Data SERP queries from newsroom URLs + date range
 3. `collect_results.py` — Executes SERP queries via Bright Data proxy with pagination, retry, and per-query timeout (20s hang protection)
 4. `article_scraper.py` — Scrapes full article content using fallback chain: newspaper3k → trafilatura → readability → goose3. Concurrent (10 workers). Replaces truncated SERP titles with full scraped titles.
-5. Sentiment analysis (spaCy + asent) applied to descriptions
 
 **Storage (`bigquery_storage.py`):**
 - `BigQueryStorage` class manages all table operations
 - Split-table schema: `press_release_metadata` + `press_release_content` (joined by `press_release_id = MD5(url)`)
-- `press_release_enriched` — sentiment analysis (regenerable)
 - `collection_runs` — pipeline run log for idempotency
 - Legacy `collected_articles` table exists but is no longer written to
 

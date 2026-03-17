@@ -327,7 +327,6 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
     runs article_scraper.py as a subprocess, then writes:
         • press_release_metadata  — SERP + company fields (from f100_joined.csv)
         • press_release_content   — scraped text (rows where article_text is set)
-        • press_release_enriched  — sentiment (from enriched.csv)
 
     Returns:
         Stats dictionary.
@@ -355,8 +354,11 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
         stats['articles_scraped'] = int(joined_df['article_text'].notna().sum())
 
         if not joined_df.empty:
-            # Metadata (one row per release — includes all SERP + company fields)
+            # Metadata (new rows only — SERP metadata was already written pre-scrape)
             storage.write_press_release_metadata(joined_df, run_id=run_id)
+
+            # Update publish_date on metadata rows from scraped data
+            storage.update_metadata_publish_dates(joined_df)
 
             # Content (only rows where scraping succeeded)
             content_df = joined_df[joined_df['article_text'].notna()].copy()
@@ -365,25 +367,6 @@ def run_article_scraping(run_id: str, storage: BigQueryStorage) -> Dict[str, Any
     else:
         print(f"[{run_id}] ⚠️  {config.JOINED_RESULTS_FILE} not found — no metadata/content written")
         stats['articles_scraped'] = 0
-
-    # ------------------------------------------------------------------
-    # Write enrichments from enriched CSV (adds sentiment column)
-    # ------------------------------------------------------------------
-    if config.ENRICHED_RESULTS_FILE.exists():
-        enriched_df = pd.read_csv(config.ENRICHED_RESULTS_FILE)
-        stats['articles_enriched'] = len(enriched_df)
-
-        if not enriched_df.empty and 'url' in enriched_df.columns:
-            enrichment_cols = ['url', 'sentiment']
-            if 'sentiment_score' in enriched_df.columns:
-                enrichment_cols.append('sentiment_score')
-            enrichments_only = enriched_df[enrichment_cols].copy()
-            if not enrichments_only.empty:
-                storage.write_press_release_enriched(
-                    enrichments_only, run_id=run_id, enrichment_version="v1.0"
-                )
-    else:
-        stats['articles_enriched'] = 0
 
     return stats
 

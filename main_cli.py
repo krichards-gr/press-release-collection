@@ -7,7 +7,6 @@ End-to-end pipeline for collecting and processing corporate press releases:
 2. Generate Google search queries for each newsroom
 3. Collect SERP results via Bright Data API
 4. Scrape full article content with multi-scraper fallback
-5. Apply sentiment analysis and enrich data
 
 Usage:
     python main.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--force-refresh]
@@ -96,6 +95,18 @@ def parse_arguments():
         help='Only process the first N companies from the input data (useful for local testing)'
     )
 
+    parser.add_argument(
+        '--write-to-bigquery',
+        action='store_true',
+        help='Write results to BigQuery (metadata + content + run log), same as Cloud Run'
+    )
+
+    parser.add_argument(
+        '--date-update',
+        action='store_true',
+        help='Standalone mode: update publish_date in BigQuery from local joined CSV (requires --write-to-bigquery)'
+    )
+
     return parser.parse_args()
 
 
@@ -166,7 +177,7 @@ def validate_dates(start_date: str, end_date: str) -> tuple[str, str]:
 
 def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
                   skip_scraping: bool = False, resume: bool = False, use_checkpoints: bool = True,
-                  limit: int = None):
+                  limit: int = None, write_to_bigquery: bool = False):
     """
     Execute the complete press release collection pipeline.
 
@@ -178,6 +189,7 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         resume: Resume from latest checkpoint
         use_checkpoints: Enable checkpointing
         limit: Only process the first N companies (for local testing)
+        write_to_bigquery: Write results to BigQuery (metadata + content + run log)
     """
     # Initialize checkpoint manager
     checkpoint_manager = None
@@ -197,11 +209,24 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
                 'timestamp': datetime.now().isoformat()
             }
             checkpoint_manager._save_metadata()
+    # BigQuery setup (when --write-to-bigquery is used)
+    storage = None
+    run_id = None
+    if write_to_bigquery:
+        import hashlib
+        import pandas as pd
+        from bigquery_storage import BigQueryStorage
+        storage = BigQueryStorage()
+        storage.initialize_tables()
+        run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+
     print("="*80)
     print("PRESS RELEASE COLLECTION PIPELINE")
     print("="*80)
     print(f"Date Range: {start_date} to {end_date}")
     print(f"Output Directory: {config.OUTPUTS_DIR}")
+    if write_to_bigquery:
+        print(f"BigQuery:   ENABLED (run_id: {run_id})")
     print("="*80 + "\n")
 
     try:
@@ -211,6 +236,21 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         print("📊 STEP 1: Fetching Company Reference Data")
         print("-" * 80)
         reference_df = grab_reference_data()
+
+        # Log run start to BigQuery
+        if storage is not None:
+            if 'corporation' in reference_df.columns:
+                companies = reference_df['corporation'].tolist()
+            elif 'Company' in reference_df.columns:
+                companies = reference_df['Company'].tolist()
+            else:
+                companies = []
+            storage.log_run_start(
+                run_id=run_id,
+                start_date=start_date,
+                end_date=end_date,
+                companies=companies[:100],
+            )
 
         if reference_df.empty:
             print("❌ No reference data found. Exiting.")
@@ -270,6 +310,19 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         # Save SERP results
         results_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
         print(f"💾 Saved {len(results_df):,} new SERP results to: {config.COLLECTED_RESULTS_FILE}")
+
+        # Write SERP metadata to BigQuery early (survives if scraping crashes)
+        if storage is not None:
+            serp_df = pd.read_csv(config.COLLECTED_RESULTS_FILE)
+            if 'link' in serp_df.columns:
+                serp_df = serp_df.rename(columns={'link': 'url'})
+            if 'press_release_id' not in serp_df.columns:
+                serp_df['press_release_id'] = serp_df['url'].apply(
+                    lambda u: hashlib.md5(str(u).strip().encode()).hexdigest()
+                )
+            n = storage.write_press_release_metadata(serp_df, run_id=run_id)
+            print(f"📊 Wrote {n:,} SERP metadata rows to BigQuery")
+
         print()
 
         # =====================================================================
@@ -299,12 +352,50 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
                     tracker.mark_batch_as_processed(results_df['link'].tolist())
                     tracker.save_processed_urls()
 
+                    # Write scraped data to BigQuery (metadata with scraped titles + content)
+                    if storage is not None and config.JOINED_RESULTS_FILE.exists():
+                        joined_df = pd.read_csv(config.JOINED_RESULTS_FILE)
+                        if 'link' in joined_df.columns:
+                            joined_df = joined_df.rename(columns={'link': 'url'})
+                        if 'press_release_id' not in joined_df.columns:
+                            joined_df['press_release_id'] = joined_df['url'].apply(
+                                lambda u: hashlib.md5(str(u).strip().encode()).hexdigest()
+                            )
+                        if not joined_df.empty:
+                            storage.write_press_release_metadata(joined_df, run_id=run_id)
+                            storage.update_metadata_publish_dates(joined_df)
+                            content_df = joined_df[joined_df['article_text'].notna()].copy()
+                            if not content_df.empty:
+                                n = storage.write_press_release_content(content_df, run_id=run_id)
+                                print(f"📊 Wrote {n:,} article content rows to BigQuery")
+
             except Exception as e:
                 print(f"❌ Article scraper failed: {e}")
                 print("   SERP results are still available in outputs/")
         else:
             print("⏭️  STEP 4: Skipping article scraping (--skip-scraping)")
             print()
+
+        # =====================================================================
+        # Log run to BigQuery
+        # =====================================================================
+        if storage is not None:
+            serp_count = len(results_df) if results_df is not None else 0
+            scraped_count = 0
+            if not skip_scraping and config.JOINED_RESULTS_FILE.exists():
+                try:
+                    jdf = pd.read_csv(config.JOINED_RESULTS_FILE)
+                    scraped_count = int(jdf['article_text'].notna().sum()) if 'article_text' in jdf.columns else 0
+                except Exception:
+                    pass
+            storage.log_run_completion(
+                run_id=run_id,
+                urls_collected=serp_count,
+                articles_scraped=scraped_count,
+                queries_executed=search_queries,
+                error_message=None,
+            )
+            print(f"📊 Run {run_id} logged to BigQuery (collected={serp_count}, scraped={scraped_count})")
 
         # =====================================================================
         # PIPELINE COMPLETE
@@ -316,7 +407,6 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         print(f"  • SERP Results:    {config.COLLECTED_RESULTS_FILE}")
         if not skip_scraping:
             print(f"  • Joined Data:     {config.JOINED_RESULTS_FILE}")
-            print(f"  • Enriched Data:   {config.ENRICHED_RESULTS_FILE}")
         print()
 
     except KeyboardInterrupt:
@@ -331,8 +421,51 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         sys.exit(1)
 
 
+def run_date_update():
+    """
+    Standalone mode: update publish_date on BigQuery metadata rows
+    using scraped dates from the local joined CSV.
+    """
+    import hashlib
+    import pandas as pd
+    from bigquery_storage import BigQueryStorage
+
+    if not config.JOINED_RESULTS_FILE.exists():
+        print(f"❌ {config.JOINED_RESULTS_FILE} not found — run the pipeline first to generate it")
+        sys.exit(1)
+
+    print("📅 Loading joined CSV for publish_date update...")
+    df = pd.read_csv(config.JOINED_RESULTS_FILE)
+
+    if 'link' in df.columns:
+        df = df.rename(columns={'link': 'url'})
+    if 'press_release_id' not in df.columns:
+        df['press_release_id'] = df['url'].apply(
+            lambda u: hashlib.md5(str(u).strip().encode()).hexdigest()
+        )
+
+    has_date = df[df['publish_date'].notna()]
+    print(f"   {len(has_date):,} of {len(df):,} rows have a scraped publish_date")
+
+    if has_date.empty:
+        print("⚠️  No publish dates to update")
+        sys.exit(0)
+
+    storage = BigQueryStorage()
+    updated = storage.update_metadata_publish_dates(has_date)
+    print(f"✅ Done — {updated:,} BigQuery rows updated")
+
+
 if __name__ == "__main__":
     args = parse_arguments()
+
+    # Standalone date update mode
+    if args.date_update:
+        if not args.write_to_bigquery:
+            print("❌ --date-update requires --write-to-bigquery")
+            sys.exit(1)
+        run_date_update()
+        sys.exit(0)
 
     # Handle incremental modes
     start_date = args.start_date
@@ -365,5 +498,6 @@ if __name__ == "__main__":
         skip_scraping=args.skip_scraping,
         resume=args.resume,
         use_checkpoints=not args.no_checkpoints,
-        limit=args.limit
+        limit=args.limit,
+        write_to_bigquery=args.write_to_bigquery,
     )

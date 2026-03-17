@@ -9,7 +9,7 @@ Automated end-to-end pipeline for collecting and analyzing corporate press relea
 - **Split-Table Schema**: `press_release_metadata` + `press_release_content` — mirrors the earnings-call-collector pattern for clean joins and efficient storage
 - **3-Layer Deduplication**: Auto date detection → query-level SERP dedup → URL-level BigQuery dedup; safe and nearly free to re-run
 - **HTTP API**: RESTful JSON endpoint for programmatic access
-- **Complete Pipeline**: Reference Data → SERP Collection → Article Scraping → Sentiment Analysis → BigQuery
+- **Complete Pipeline**: Reference Data → SERP Collection → Article Scraping → BigQuery
 - **Multi-Scraper Fallback**: 4-tier scraper chain (newspaper3k → trafilatura → readability → goose3) for 90%+ success rate
 - **Full Titles**: Scraped page titles replace truncated SERP titles wherever available
 - **Hang Protection**: Per-query timeout skips hung SERP requests; failures logged for retry via alternative API
@@ -21,7 +21,6 @@ Automated end-to-end pipeline for collecting and analyzing corporate press relea
 - Python 3.13+
 - Google Cloud BigQuery access (for reference data)
 - Bright Data SERP API credentials
-- spaCy English model: `python -m spacy download en_core_web_lg`
 
 ## 🛠️ Installation
 
@@ -36,9 +35,6 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Download spaCy model
-python -m spacy download en_core_web_lg
 
 # Copy .env template and add your credentials
 cp .env.example .env
@@ -173,11 +169,6 @@ python main_cli.py --force-refresh
 - Comprehensive error reporting
 - **Success rate: 90-95%**
 
-### 5. Sentiment Analysis
-- spaCy + asent for sentiment classification
-- Categories: positive, negative, neutral
-- Applied to article descriptions
-
 ## 📁 Data Storage
 
 ### BigQuery Tables (Primary Storage)
@@ -186,7 +177,6 @@ python main_cli.py --force-refresh
 project.pressure_monitoring/
 ├── press_release_metadata   # One row per release: SERP fields + company info
 ├── press_release_content    # Scraped article text (joined by press_release_id)
-├── press_release_enriched   # Sentiment analysis results (regenerable)
 └── collection_runs          # Pipeline run log: status, dates, queries executed
 ```
 
@@ -205,7 +195,6 @@ See [BIGQUERY_SCHEMA.md](docs/BIGQUERY_SCHEMA.md) for full schema details.
 outputs/
 ├── f100_collected_results.csv   # SERP results
 ├── f100_joined.csv               # Joined SERP + scraped content
-├── enriched.csv                  # Enriched data with sentiment
 ├── scraper_errors.csv            # Article scraping failures
 ├── filtered_urls.csv             # Non-article URLs filtered out
 └── serp_failed_queries.csv       # SERP queries that timed out or failed

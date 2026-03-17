@@ -2,14 +2,13 @@
 
 ## Dataset: `pressure_monitoring`
 
-4-table design — mirrors the metadata/content split used in the
+3-table design — mirrors the metadata/content split used in the
 `earnings-call-collector` project:
 
 | Table | Analogue in earnings-call-collector | Purpose |
 |-------|-------------------------------------|---------|
 | `press_release_metadata` | `earnings_call_transcript_metadata` | One row per press release — SERP fields + company info |
 | `press_release_content` | `earnings_call_transcript_content` | Scraped article text for each release |
-| `press_release_enriched` | — | Sentiment analysis (can be regenerated) |
 | `collection_runs` | — | Pipeline run log — idempotency and scheduling |
 
 > **Legacy**: `collected_articles` still exists in BigQuery with historical data
@@ -102,41 +101,7 @@ WHERE m.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DA
 
 ---
 
-## Table 3: `press_release_enriched`
-
-**Purpose**: Sentiment analysis results.
-Can be regenerated/versioned without re-scraping.
-Joined to metadata via `url`.
-
-**Schema**:
-
-| Column | Type | Mode | Description |
-|--------|------|------|-------------|
-| `url` | STRING | REQUIRED | Article URL (foreign key to `press_release_metadata`) |
-| `sentiment` | STRING | NULLABLE | Sentiment label: positive, negative, neutral |
-| `sentiment_score` | FLOAT | NULLABLE | Sentiment polarity score (-1.0 to 1.0) |
-| `enrichment_timestamp` | TIMESTAMP | REQUIRED | When enrichments were generated |
-| `enrichment_version` | STRING | NULLABLE | Version of enrichment pipeline (e.g. "v1.0") |
-| `run_id` | STRING | NULLABLE | Pipeline run identifier |
-
-**Partitioned** by `enrichment_timestamp` (day).
-**Clustered** by `url`.
-
-**Example Query (latest enrichments per article)**:
-```sql
-WITH latest AS (
-  SELECT *,
-    ROW_NUMBER() OVER (PARTITION BY url ORDER BY enrichment_timestamp DESC) AS rn
-  FROM `pressure_monitoring.press_release_enriched`
-)
-SELECT url, sentiment, sentiment_score, enrichment_version
-FROM latest
-WHERE rn = 1;
-```
-
----
-
-## Table 4: `collection_runs`
+## Table 3: `collection_runs`
 
 **Purpose**: Tracks every pipeline execution.
 - **Scheduling**: `get_last_successful_run_end_date()` reads this table so the
@@ -209,7 +174,7 @@ LIMIT 10;
 
 ## Joining All Tables
 
-**Full view: metadata + content + enrichments**:
+**Full view: metadata + content**:
 
 ```sql
 SELECT
@@ -219,16 +184,10 @@ SELECT
   m.publish_date,
   m.newsroom_url,
   c.article_text,
-  c.scraper_used,
-  e.sentiment
+  c.scraper_used
 FROM `pressure_monitoring.press_release_metadata` m
 LEFT JOIN `pressure_monitoring.press_release_content` c
   ON m.press_release_id = c.press_release_id
-LEFT JOIN (
-  SELECT url, sentiment,
-    ROW_NUMBER() OVER (PARTITION BY url ORDER BY enrichment_timestamp DESC) AS rn
-  FROM `pressure_monitoring.press_release_enriched`
-) e ON m.url = e.url AND e.rn = 1
 WHERE m.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
 ORDER BY m.company, m.publish_date DESC;
 ```
@@ -243,8 +202,7 @@ Tables are auto-created by the pipeline on first run:
 from bigquery_storage import BigQueryStorage
 storage = BigQueryStorage()
 storage.initialize_tables()
-# Creates: press_release_metadata, press_release_content,
-#          press_release_enriched, collection_runs
+# Creates: press_release_metadata, press_release_content, collection_runs
 ```
 
 ---

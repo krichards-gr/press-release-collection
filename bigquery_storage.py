@@ -8,8 +8,7 @@ Schema Design:
 --------------
 1. press_release_metadata: One row per press release — SERP fields + company info (immutable)
 2. press_release_content:  One row per scraped release — article text, summary, keywords
-3. press_release_enriched:  URL + analysis results (sentiment) — can be regenerated
-4. collection_runs:        Pipeline execution log — idempotency, backfill, run auditing
+3. collection_runs:        Pipeline execution log — idempotency, backfill, run auditing
 
 The metadata/content split mirrors the earnings-call-collector pattern:
   earnings_call_transcript_metadata  ↔  press_release_metadata
@@ -193,51 +192,6 @@ class BigQueryStorage:
             self.client.create_table(table)
             print(f"✓ Created table: {table_id}")
 
-    def create_press_release_enriched_table(self):
-        """
-        Create table for press release enrichments (sentiment analysis).
-
-        This table stores analysis results that can be regenerated.
-        URL is the primary key to join back to press_release_metadata.
-        """
-        table_id = self._get_table_ref("press_release_enriched")
-
-        schema = [
-            # Primary key
-            bigquery.SchemaField("url", "STRING", mode="REQUIRED",
-                                 description="Article URL (foreign key to press_release_metadata)"),
-
-            # Enrichments
-            bigquery.SchemaField("sentiment", "STRING", mode="NULLABLE",
-                                 description="Sentiment label: positive, negative, neutral"),
-            bigquery.SchemaField("sentiment_score", "FLOAT", mode="NULLABLE",
-                                 description="Sentiment polarity score (-1.0 to 1.0)"),
-
-            # Metadata
-            bigquery.SchemaField("enrichment_timestamp", "TIMESTAMP", mode="REQUIRED",
-                                 description="When enrichments were generated"),
-            bigquery.SchemaField("enrichment_version", "STRING", mode="NULLABLE",
-                                 description="Version of enrichment pipeline"),
-            bigquery.SchemaField("run_id", "STRING", mode="NULLABLE",
-                                 description="Pipeline run identifier"),
-        ]
-
-        table = bigquery.Table(table_id, schema=schema)
-
-        table.time_partitioning = bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY,
-            field="enrichment_timestamp"
-        )
-
-        table.clustering_fields = ["url"]
-
-        try:
-            self.client.get_table(table_id)
-            print(f"✓ Table exists: {table_id}")
-        except NotFound:
-            self.client.create_table(table)
-            print(f"✓ Created table: {table_id}")
-
     def create_collection_runs_table(self):
         """
         Create table for tracking pipeline execution runs.
@@ -335,7 +289,6 @@ class BigQueryStorage:
         print("\n📊 Initializing BigQuery tables...")
         self.create_press_release_metadata_table()
         self.create_press_release_content_table()
-        self.create_press_release_enriched_table()
         self.create_collection_runs_table()
         print()
 
@@ -528,6 +481,52 @@ class BigQueryStorage:
         print(f"✓ Wrote {len(df_to_write):,} rows to press_release_metadata: {table_id}")
         return len(df_to_write)
 
+    def update_metadata_publish_dates(self, df: pd.DataFrame) -> int:
+        """
+        Update publish_date on existing press_release_metadata rows.
+
+        Called after scraping, which extracts publish dates that were not
+        available in the original SERP results.
+
+        Args:
+            df: DataFrame with at least 'press_release_id' and 'publish_date' columns.
+
+        Returns:
+            Number of rows updated.
+        """
+        if df.empty or 'publish_date' not in df.columns:
+            return 0
+
+        df = df.copy()
+        df['publish_date'] = pd.to_datetime(df['publish_date'], errors='coerce')
+
+        # Only rows that actually have a scraped publish_date
+        has_date = df[df['publish_date'].notna()].copy()
+        if has_date.empty:
+            return 0
+
+        table_id = self._get_table_ref("press_release_metadata")
+        updated = 0
+
+        for _, row in has_date.iterrows():
+            pid = row['press_release_id']
+            ts = row['publish_date'].strftime('%Y-%m-%d %H:%M:%S')
+            query = f"""
+                UPDATE `{table_id}`
+                SET publish_date = TIMESTAMP('{ts}')
+                WHERE press_release_id = '{pid}'
+                  AND publish_date IS NULL
+            """
+            try:
+                result = self.client.query(query).result()
+                updated += result.num_dml_affected_rows or 0
+            except Exception:
+                pass  # best-effort
+
+        if updated:
+            print(f"✓ Updated publish_date on {updated:,} metadata rows")
+        return updated
+
     def write_press_release_content(self, df: pd.DataFrame, run_id: str = None) -> int:
         """
         Write press release content to BigQuery (press_release_content table).
@@ -604,8 +603,8 @@ class BigQueryStorage:
 
         row = {
             'run_id': run_id,
-            'start_date': start_date,
-            'end_date': end_date,
+            'start_date': datetime.strptime(start_date, '%Y-%m-%d').date(),
+            'end_date': datetime.strptime(end_date, '%Y-%m-%d').date(),
             'companies_processed': companies or [],
             'urls_collected': 0,
             'articles_scraped': 0,
@@ -708,57 +707,6 @@ class BigQueryStorage:
         except Exception as e:
             print(f"⚠️  Error checking executed queries: {e}")
             return set()
-
-    # =========================================================================
-    # ENRICHMENTS
-    # =========================================================================
-
-    def write_press_release_enriched(self, df: pd.DataFrame, run_id: str = None,
-                                      enrichment_version: str = "v1.0") -> int:
-        """
-        Write press release enrichments (sentiment) to BigQuery.
-
-        Expected DataFrame columns:
-        - Required: url
-        - Enrichments: sentiment, sentiment_score
-
-        Args:
-            df:                  DataFrame with enrichment data
-            run_id:              Optional run identifier
-            enrichment_version:  Version identifier for enrichment pipeline
-
-        Returns:
-            Number of rows written.
-        """
-        if df.empty:
-            print("⚠️  No enrichments to write")
-            return 0
-
-        table_id = self._get_table_ref("press_release_enriched")
-
-        df = df.copy()
-        df['enrichment_timestamp'] = datetime.utcnow()
-        df['enrichment_version'] = enrichment_version
-        df['run_id'] = run_id
-
-        if 'url' not in df.columns:
-            raise ValueError("DataFrame must have 'url' column")
-
-        schema_columns = [
-            'url', 'sentiment', 'sentiment_score',
-            'enrichment_timestamp', 'enrichment_version', 'run_id'
-        ]
-        df_to_write = df[[col for col in schema_columns if col in df.columns]]
-
-        job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        )
-
-        job = self.client.load_table_from_dataframe(df_to_write, table_id, job_config=job_config)
-        job.result()
-
-        print(f"✓ Wrote {len(df_to_write):,} enrichments to press_release_enriched: {table_id}")
-        return len(df_to_write)
 
     # =========================================================================
     # BACKFILL / URL CHECKS
@@ -864,45 +812,6 @@ class BigQueryStorage:
             print(f"⚠️  Table not found: {table_id}")
             return set()
 
-    def get_urls_needing_enrichment(self, enrichment_version: str = None) -> List[str]:
-        """
-        Get URLs that need enrichment (new or different version).
-
-        Args:
-            enrichment_version: If specified, only get URLs without this version.
-
-        Returns:
-            List of URLs needing enrichment.
-        """
-        metadata_table = self._get_table_ref("press_release_metadata")
-        enrichments_table = self._get_table_ref("press_release_enriched")
-
-        if enrichment_version:
-            query = f"""
-                SELECT DISTINCT m.url
-                FROM `{metadata_table}` m
-                LEFT JOIN `{enrichments_table}` e
-                    ON m.url = e.url
-                    AND e.enrichment_version = '{enrichment_version}'
-                WHERE e.url IS NULL
-            """
-        else:
-            query = f"""
-                SELECT DISTINCT m.url
-                FROM `{metadata_table}` m
-                LEFT JOIN `{enrichments_table}` e ON m.url = e.url
-                WHERE e.url IS NULL
-            """
-
-        try:
-            results = self.client.query(query).result()
-            urls = [row.url for row in results]
-            print(f"📝 Found {len(urls):,} URLs needing enrichment")
-            return urls
-        except Exception as e:
-            print(f"⚠️  Error getting URLs for enrichment: {e}")
-            return []
-
     # =========================================================================
     # LEGACY: write_collected_articles (no longer called by pipeline)
     # =========================================================================
@@ -959,7 +868,6 @@ if __name__ == "__main__":
 
     print("\n✅ BigQuery storage initialisation complete")
     print("Tables created/verified:")
-    print("  • press_release_metadata  (new — one row per press release)")
-    print("  • press_release_content   (new — scraped text for each release)")
-    print("  • press_release_enriched  (sentiment analysis)")
+    print("  • press_release_metadata  (one row per press release)")
+    print("  • press_release_content   (scraped text for each release)")
     print("  • collection_runs         (pipeline run log)")

@@ -143,9 +143,6 @@ ORDER BY start_timestamp DESC LIMIT 5;
 
 -- Check collected articles
 SELECT COUNT(*) FROM `pressure_monitoring.collected_articles`;
-
--- Check enrichments
-SELECT COUNT(*) FROM `pressure_monitoring.press_release_enriched`;
 ```
 
 ---

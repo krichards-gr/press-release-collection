@@ -162,9 +162,6 @@ bq query 'SELECT * FROM pressure_monitoring.collection_runs ORDER BY start_times
 
 # Check collected articles
 bq query 'SELECT COUNT(*) as total FROM pressure_monitoring.collected_articles'
-
-# Check enrichments
-bq query 'SELECT sentiment, COUNT(*) as count FROM pressure_monitoring.press_release_enriched GROUP BY sentiment'
 ```
 
 ---

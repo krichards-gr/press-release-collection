@@ -88,7 +88,6 @@ class Config:
 
     COLLECTED_RESULTS_FILE = OUTPUTS_DIR / "f100_collected_results.csv"
     JOINED_RESULTS_FILE = OUTPUTS_DIR / "f100_joined.csv"
-    ENRICHED_RESULTS_FILE = OUTPUTS_DIR / "enriched.csv"
     SCRAPER_ERRORS_FILE = OUTPUTS_DIR / "scraper_errors.csv"
     FILTERED_URLS_FILE = OUTPUTS_DIR / "filtered_urls.csv"
     SERP_FAILED_QUERIES_FILE = OUTPUTS_DIR / "serp_failed_queries.csv"
@@ -137,4 +136,4 @@ if __name__ == "__main__":
     print(f"\nData Files:")
     print(f"  Reference Data: {Config.REFERENCE_DATA_FILE}")
     print(f"  Collected Results: {Config.COLLECTED_RESULTS_FILE}")
-    print(f"  Enriched Results: {Config.ENRICHED_RESULTS_FILE}")
+    print(f"  Joined Results: {Config.JOINED_RESULTS_FILE}")

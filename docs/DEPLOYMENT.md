@@ -198,8 +198,7 @@ Content-Type: application/json
     "companies_count": 100,
     "queries_count": 100,
     "serp_results_count": 150,
-    "articles_scraped": 135,
-    "articles_enriched": 135
+    "articles_scraped": 135
   }
 }
 ```
@@ -286,14 +285,6 @@ WHERE collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
 GROUP BY date
 ORDER BY date DESC;
 
--- Check enrichment coverage
-SELECT
-  COUNT(DISTINCT c.url) as total_articles,
-  COUNT(DISTINCT e.url) as enriched_articles,
-  ROUND(COUNT(DISTINCT e.url) / COUNT(DISTINCT c.url) * 100, 2) as coverage_pct
-FROM `pressure_monitoring.collected_articles` c
-LEFT JOIN `pressure_monitoring.press_release_enriched` e ON c.url = e.url
-WHERE c.collection_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY);
 ```
 
 ## Cost Optimization
