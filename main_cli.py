@@ -31,6 +31,8 @@ import subprocess
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
+import re
+import urllib.parse
 
 import pandas as pd
 
@@ -97,6 +99,21 @@ def parse_arguments():
     )
 
     return parser.parse_args()
+
+
+def _extract_newsroom_from_query(query: str) -> str:
+    """
+    Extract the newsroom base URL from a Google SERP query string.
+    """
+    try:
+        parsed = urllib.parse.urlparse(query)
+        q_param = urllib.parse.parse_qs(parsed.query).get('q', [''])[0]
+        match = re.match(r'site:(\S+)', q_param)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return ''
 
 
 # =============================================================================
@@ -258,6 +275,33 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
             print("No SERP results collected. Exiting.")
             sys.exit(1)
 
+        # -- Annotate with newsroom, company, and sector --
+        print("Annotating SERP results with corporate reference data...")
+        newsroom_to_company = {}
+        newsroom_to_sector = {}
+        if 'newsroom_url' in reference_df.columns:
+            for _, row in reference_df.iterrows():
+                newsroom = str(row.get('newsroom_url') or '').strip()
+                corp = str(row.get('corporation') or '').strip()
+                sector = str(row.get('sector') or '').strip()
+                if newsroom:
+                    newsroom_to_company[newsroom] = corp
+                    newsroom_to_sector[newsroom] = sector
+
+        # Normalize column name
+        if 'link' in results_df.columns:
+            results_df = results_df.rename(columns={'link': 'url'})
+
+        # Generate deterministic IDs
+        if 'press_release_id' not in results_df.columns:
+            results_df['press_release_id'] = results_df['url'].apply(
+                lambda u: hashlib.md5(str(u).strip().encode()).hexdigest()
+            )
+
+        results_df['newsroom_url'] = results_df['query'].apply(_extract_newsroom_from_query)
+        results_df['company'] = results_df['newsroom_url'].map(newsroom_to_company).fillna('')
+        results_df['sector'] = results_df['newsroom_url'].map(newsroom_to_sector).fillna('')
+
         # Save raw SERP results to CSV (article_scraper.py reads this file)
         results_df.to_csv(config.COLLECTED_RESULTS_FILE, index=False)
         print(f"Saved {len(results_df):,} SERP results to: "
@@ -267,16 +311,6 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         # This ensures metadata survives even if scraping crashes later.
         if storage is not None:
             serp_df = pd.read_csv(config.COLLECTED_RESULTS_FILE)
-
-            # Normalize column name
-            if 'link' in serp_df.columns:
-                serp_df = serp_df.rename(columns={'link': 'url'})
-
-            # Generate deterministic IDs
-            if 'press_release_id' not in serp_df.columns:
-                serp_df['press_release_id'] = serp_df['url'].apply(
-                    lambda u: hashlib.md5(str(u).strip().encode()).hexdigest()
-                )
 
             n = storage.write_press_release_metadata(serp_df, run_id=run_id)
             print(f"Wrote {n:,} SERP metadata rows to BigQuery")
