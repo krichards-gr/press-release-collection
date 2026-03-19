@@ -651,6 +651,28 @@ class BigQueryStorage:
             print("No scraped content to write (all article_text values are empty/null)")
             return 0
 
+        # -- Dedup against existing content rows --
+        # Prevents duplicate content when the same article is scraped across
+        # multiple runs (e.g. overlapping date ranges or Cloud Scheduler re-runs).
+        try:
+            existing_query = f"SELECT press_release_id FROM `{table_id}`"
+            existing_content_ids = {
+                row.press_release_id
+                for row in self.client.query(existing_query).result()
+            }
+            if existing_content_ids:
+                before = len(df)
+                df = df[~df['press_release_id'].isin(existing_content_ids)]
+                skipped = before - len(df)
+                if skipped:
+                    print(f"Skipped {skipped:,} content rows already in BigQuery")
+        except Exception as e:
+            print(f"Warning: Could not check existing content IDs: {e} -- proceeding anyway")
+
+        if df.empty:
+            print("No new content to write (all already in BigQuery)")
+            return 0
+
         # Only write columns that match the table schema (no summary/keywords)
         schema_columns = [
             'press_release_id', 'article_text', 'scraper_used',

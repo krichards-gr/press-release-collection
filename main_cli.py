@@ -103,16 +103,26 @@ def parse_arguments():
 
 def _extract_newsroom_from_query(query: str) -> str:
     """
-    Extract the newsroom base URL from a Google SERP query string.
+    Extract the newsroom base URL from a SERP query string.
+
+    Handles two formats:
+      1. Full Google URL: https://www.google.com/search?q=site:https://...
+      2. Raw query text:  site:https://about.att.com/story/ before:2026-03-17
     """
+    # Try as full URL first (has ?q= parameter)
     try:
         parsed = urllib.parse.urlparse(query)
-        q_param = urllib.parse.parse_qs(parsed.query).get('q', [''])[0]
-        match = re.match(r'site:(\S+)', q_param)
-        if match:
-            return match.group(1)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            q_param = urllib.parse.parse_qs(parsed.query).get('q', [''])[0]
+            match = re.match(r'site:(\S+)', q_param)
+            if match:
+                return match.group(1).rstrip('/')
     except Exception:
         pass
+    # Fallback: raw query text (site:url before:... after:...)
+    match = re.match(r'site:(\S+)', query.strip())
+    if match:
+        return match.group(1).rstrip('/')
     return ''
 
 
@@ -281,7 +291,7 @@ def run_pipeline(start_date: str, end_date: str, force_refresh: bool = False,
         newsroom_to_sector = {}
         if 'newsroom_url' in reference_df.columns:
             for _, row in reference_df.iterrows():
-                newsroom = str(row.get('newsroom_url') or '').strip()
+                newsroom = str(row.get('newsroom_url') or '').strip().rstrip('/')
                 corp = str(row.get('corporation') or '').strip()
                 sector = str(row.get('sector') or '').strip()
                 if newsroom:

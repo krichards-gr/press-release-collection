@@ -39,7 +39,7 @@ from config import config
 QUERY = """
     SELECT corporation, sector, newsroom_url
     FROM `sri-benchmarking-databases.social_media_activity_archive.benchmarking_corporate_reference`
-    WHERE F100 IS TRUE
+    WHERE Rank <= 100
     AND newsroom_url IS NOT NULL
     ORDER BY Rank
 """
