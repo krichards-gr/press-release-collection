@@ -97,6 +97,14 @@ def parse_arguments():
         '--date-update', action='store_true',
         help='Standalone mode: update publish_date in BQ from local joined CSV'
     )
+    parser.add_argument(
+        '--backfill-dates', action='store_true',
+        help='Backfill NULL publish_date rows in BQ using URL/text date extraction'
+    )
+    parser.add_argument(
+        '--no-fallback-date', action='store_true',
+        help='With --backfill-dates: skip collection_date fallback, leave unresolved rows NULL'
+    )
 
     return parser.parse_args()
 
@@ -482,11 +490,78 @@ def run_date_update():
 
 
 # =============================================================================
+# BACKFILL DATES FROM BIGQUERY
+# =============================================================================
+
+def run_backfill_dates(no_fallback_date: bool = False):
+    """
+    Backfill NULL publish_date rows in BigQuery using URL/text date extraction.
+
+    Fetches all metadata rows where publish_date IS NULL (joined with content
+    for article_text), runs the date extraction priority chain
+    (URL → text → collection_timestamp), and updates BigQuery.
+
+    Args:
+        no_fallback_date: If True, skip the collection_date fallback and leave
+                          unresolved rows as NULL.
+    """
+    from bigquery_storage import BigQueryStorage
+    from date_extractor import resolve_dates_df
+
+    storage = BigQueryStorage()
+
+    # Fetch rows needing dates
+    df = storage.fetch_null_publish_date_rows()
+    if df.empty:
+        print("No rows with NULL publish_date — nothing to backfill")
+        return
+
+    # Run date extraction chain (scraper date is already NULL for these rows,
+    # so it will fall through to URL → text → collection_timestamp)
+    df['publish_date'] = None  # ensure column exists for resolve_dates_df
+    df = resolve_dates_df(df)
+
+    if no_fallback_date:
+        # Clear dates that came from the collection_date fallback
+        df.loc[df['publish_date_source'] == 'collection_date', 'publish_date'] = None
+    else:
+        # Use collection_timestamp as the fallback instead of today's date,
+        # since these are historical rows
+        for i, row in df.iterrows():
+            if row.get('publish_date_source') == 'collection_date':
+                ct = row.get('collection_timestamp')
+                if ct is not None:
+                    df.at[i, 'publish_date'] = ct.date() if hasattr(ct, 'date') else ct
+
+    # Report source breakdown
+    source_counts = df['publish_date_source'].value_counts()
+    print(f"\nDate sources for {len(df):,} rows:")
+    for source, count in source_counts.items():
+        label = f"{source} (skipped)" if source == 'collection_date' and no_fallback_date else source
+        print(f"   {label:.<30} {count:>5} ({count / len(df) * 100:.1f}%)")
+
+    # Update BigQuery (only rows where we found a date)
+    has_date = df[df['publish_date'].notna()].copy()
+    if has_date.empty:
+        print("No dates resolved — nothing to update")
+        return
+
+    print(f"\nUpdating {len(has_date):,} rows in BigQuery...")
+    updated = storage.update_metadata_publish_dates(has_date)
+    print(f"Done — {updated:,} BigQuery rows updated")
+
+
+# =============================================================================
 # ENTRY POINT
 # =============================================================================
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    # -- Backfill NULL publish_date rows in BQ --
+    if args.backfill_dates:
+        run_backfill_dates(no_fallback_date=args.no_fallback_date)
+        sys.exit(0)
 
     # -- Standalone date update mode --
     if args.date_update:

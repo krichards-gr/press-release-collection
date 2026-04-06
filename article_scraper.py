@@ -715,6 +715,19 @@ if __name__ == "__main__":
             joined.loc[has_scraped, 'title'] = joined.loc[has_scraped, 'scraped_title']
             joined = joined.drop(columns=['scraped_title'])
 
+        # Resolve publish_date using priority chain:
+        # scraper date → URL date → text date → collection date (today)
+        from date_extractor import resolve_dates_df
+        before_count = joined['publish_date'].notna().sum() if 'publish_date' in joined.columns else 0
+        joined = resolve_dates_df(joined)
+        after_count = joined['publish_date'].notna().sum()
+        filled = after_count - before_count
+        if filled > 0:
+            print(f"   Date resolution filled {filled:,} additional publish_date values")
+        if 'publish_date_source' in joined.columns:
+            source_counts = joined['publish_date_source'].value_counts()
+            print(f"   Date sources: {dict(source_counts)}")
+
         # Write the final joined CSV
         joined.to_csv(config.JOINED_RESULTS_FILE, index=False)
         print(f"   Saved joined data to {config.JOINED_RESULTS_FILE}")

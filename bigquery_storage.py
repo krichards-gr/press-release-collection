@@ -611,6 +611,32 @@ class BigQueryStorage:
             print(f"Updated publish_date on {updated:,} metadata rows")
         return updated
 
+    def fetch_null_publish_date_rows(self) -> pd.DataFrame:
+        """
+        Fetch metadata rows where publish_date IS NULL, joined with content.
+
+        Returns a DataFrame with press_release_id, url, article_text, and
+        collection_timestamp for use with the date extraction backfill.
+        """
+        meta_table = self._get_table_ref("press_release_metadata")
+        content_table = self._get_table_ref("press_release_content")
+
+        query = f"""
+            SELECT
+                m.press_release_id,
+                m.url,
+                c.article_text,
+                m.collection_timestamp
+            FROM `{meta_table}` m
+            LEFT JOIN `{content_table}` c
+              ON m.press_release_id = c.press_release_id
+            WHERE m.publish_date IS NULL
+        """
+        print("Querying BQ for rows with NULL publish_date...")
+        df = self.client.query(query).to_dataframe()
+        print(f"Found {len(df):,} rows with NULL publish_date")
+        return df
+
     def write_press_release_content(self, df: pd.DataFrame,
                                     run_id: str = None) -> int:
         """

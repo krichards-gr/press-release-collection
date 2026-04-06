@@ -38,3 +38,8 @@ dependencies = [
     # -- Build tools (needed for some native dependencies) --
     "setuptools>=82.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

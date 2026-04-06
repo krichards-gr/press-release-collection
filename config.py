@@ -83,7 +83,7 @@ class Config:
 
     # -- SERP collection tuning --
     # How many Google result pages to fetch per query (each page ~ 10 results).
-    MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '2'))
+    MAX_SERP_PAGES = int(os.getenv('MAX_SERP_PAGES', '5'))
 
     # Number of retry attempts per individual SERP HTTP request on transient failure.
     SERP_RETRY_ATTEMPTS = int(os.getenv('SERP_RETRY_ATTEMPTS', '3'))
