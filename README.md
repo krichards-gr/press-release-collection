@@ -1,6 +1,6 @@
 # Corporate Press Release Collection Pipeline
 
-Automated end-to-end pipeline for collecting and analyzing corporate press releases from Fortune 100 company newsrooms. Designed for Google Cloud Run with BigQuery storage.
+Automated collection-only pipeline for corporate press releases from Fortune 100 company newsrooms. Uses Bright Data SERP API for search, a 5-tier scraper fallback chain for content extraction, and stores everything in BigQuery. Runs on Google Cloud Run (production) or locally via CLI.
 
 ## 🚀 Features
 
@@ -10,7 +10,7 @@ Automated end-to-end pipeline for collecting and analyzing corporate press relea
 - **3-Layer Deduplication**: Auto date detection → query-level SERP dedup → URL-level BigQuery dedup; safe and nearly free to re-run
 - **HTTP API**: RESTful JSON endpoint for programmatic access
 - **Complete Pipeline**: Reference Data → SERP Collection → Article Scraping → BigQuery
-- **Multi-Scraper Fallback**: 4-tier scraper chain (newspaper3k → trafilatura → readability → goose3) for 90%+ success rate
+- **Multi-Scraper Fallback**: 5-tier scraper chain (newspaper3k → trafilatura → readability → goose3 → Bright Data Unlocker) for 90%+ success rate
 - **Full Titles**: Scraped page titles replace truncated SERP titles wherever available
 - **Hang Protection**: Per-query timeout skips hung SERP requests; failures logged for retry via alternative API
 - **Scalable**: Stateless design, automatic scaling, containerized deployment
@@ -29,12 +29,11 @@ Automated end-to-end pipeline for collecting and analyzing corporate press relea
 git clone <repo-url>
 cd press-release-collection
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Install dependencies (uses uv, see .python-version for Python 3.13)
+uv sync
 
-# Install dependencies
-pip install -r requirements.txt
+# Download required NLP models
+python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
 
 # Copy .env template and add your credentials
 cp .env.example .env
@@ -72,13 +71,12 @@ All settings centralized in `config.py`:
 
 ```powershell
 # Windows
-.\deploy.ps1
+powershell scripts/deploy.ps1
 ```
 
 ```bash
 # Mac/Linux
-chmod +x deploy.sh
-./deploy.sh
+./scripts/deploy.sh
 ```
 
 **What it does**:
@@ -131,11 +129,14 @@ python main_cli.py --incremental
 # Process last 7 days
 python main_cli.py --last-n-days 7
 
-# Resume from latest checkpoint
-python main_cli.py --resume
+# Write results to BigQuery (like Cloud Run does)
+python main_cli.py --write-to-bigquery
 
 # Force refresh of BigQuery reference data (bypass cache)
 python main_cli.py --force-refresh
+
+# Backfill missing publish dates from scraped content
+python main_cli.py --backfill-dates
 ```
 
 ## 📊 Pipeline Stages
@@ -163,6 +164,7 @@ python main_cli.py --force-refresh
   2. trafilatura (robust, bypasses bot protection)
   3. readability (Mozilla algorithm)
   4. goose3 (alternative robust option)
+  5. Bright Data Unlocker (paid API, last resort)
 - URL filtering (skip pagination/index pages)
 - Concurrent processing (10 workers default)
 - Scraped page title replaces truncated SERP title wherever available
@@ -212,11 +214,6 @@ outputs/
 - **`generate_queries.py`**: Search query generation
 - **`collect_results.py`**: SERP collection with retry logic and query timeouts
 - **`article_scraper.py`**: Multi-scraper content extraction with title enrichment
-
-### Utility Modules
-
-- **`deduplication.py`**: URL tracking (CLI only)
-- **`checkpointing.py`**: Fault tolerance (CLI only)
 
 ## 📈 Performance
 
