@@ -219,6 +219,51 @@ To avoid these issues in the future:
 
 ---
 
+### Issue: Recent Press Releases Not Being Captured
+
+**Symptoms:**
+- Press releases published 1–2 days ago are missing from BigQuery
+- Daily runs complete successfully but report "No new press release metadata to write"
+- Specific URLs verified absent from `press_release_metadata`
+
+**Root Cause:**
+Google's indexing lag. Brand-new articles can take 24–48 hours to appear in `site:` searches with `before:`/`after:` date filters. With the old logic, `start_date` was set exactly to the last run's `end_date`, so any article not yet indexed at run time was permanently skipped by all future runs.
+
+**Solution (applied 2026-04-16):**
+`start_date` auto-detection now rolls back 3 days from the last run's `end_date`. URL-level dedup prevents re-scraping articles already in `press_release_content`.
+
+**If you have a known missing URL**, trigger a manual catchup run covering a window around its publish date:
+```bash
+curl -X POST $SERVICE_URL \
+  -H 'Content-Type: application/json' \
+  -d '{"start_date": "2026-04-13", "end_date": "2026-04-16"}'
+```
+
+---
+
+### Issue: All Runs Failing with Schema Mismatch (`Cannot add fields: summary`)
+
+**Symptoms:**
+```
+400 POST .../jobs?uploadType=multipart: Provided Schema does not match Table
+press_release_content. Cannot add fields (field: summary)
+```
+Runs show `articles_scraped: 0` and `status: failed` in `collection_runs`.
+
+**Root Cause:**
+Cloud Run was running an older version of the code (pre-`collection-only` branch) that wrote a `summary` field to `press_release_content`. The BQ table was created with the new schema that has no `summary` column.
+
+**Solution:**
+Redeploy Cloud Run with the current branch code:
+```powershell
+powershell scripts/deploy.ps1
+```
+
+**Side effect of this failure pattern:**
+Since all runs fail, `get_last_successful_run_end_date()` never advances. Every run re-covers the same date range (from the last truly-completed run). However, metadata IS written before the crash, so URLs accumulate in `press_release_metadata`. After fixing and redeploying, the next run will show "No new metadata" (all already known) but will successfully write content for all accumulated URLs.
+
+---
+
 ## Recent Fixes
 
 **2026-02-12 (CRITICAL SSL FIX):**

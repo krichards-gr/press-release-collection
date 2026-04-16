@@ -503,10 +503,15 @@ def press_release_collection(request: Request):
         if 'start_date' not in request_json:
             last_end_date = storage.get_last_successful_run_end_date()
             if last_end_date:
-                # Start from last run's end_date (1-day overlap for safety)
-                auto_start = last_end_date
+                # Roll back 3 days from the last run's end_date. Google's
+                # indexing lag means brand-new articles can take 24-48 hours
+                # to appear in site: searches -- a 3-day overlap ensures we
+                # catch articles that weren't indexed yet on the previous run.
+                # URL-level dedup prevents re-inserting anything we already have.
+                last_end_dt = datetime.strptime(last_end_date, '%Y-%m-%d').date()
+                auto_start = (last_end_dt - timedelta(days=3)).strftime('%Y-%m-%d')
                 print(f"[{run_id}] Auto start_date: {auto_start} "
-                      f"(last run's end_date)")
+                      f"(last run's end_date {last_end_date} minus 3-day overlap)")
             else:
                 # First ever run: default 7-day lookback
                 auto_start = (today - timedelta(days=7)).strftime('%Y-%m-%d')

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-16 - 3-Day Rolling Overlap for Google Indexing Lag
+
+### Problem
+Brand-new press releases (published same-day or day-before) can take 24–48 hours to appear in Google's `site:` search results. With the previous logic, `start_date` was set exactly to the last run's `end_date`, meaning any article that Google hadn't indexed yet at run time would be permanently missed — future runs would start from a later date and never re-cover that window.
+
+**Example:** A press release published April 15 was not returned by SERP on the April 16 run because Google hadn't indexed it yet. The April 17 run would have started from April 16, permanently skipping April 15.
+
+### Solution
+Auto-detected `start_date` now rolls back 3 days from the last successful run's `end_date`. URL-level deduplication (checking `press_release_content`) ensures already-collected articles are not re-scraped.
+
+### Files Modified
+- `main.py` — `start_date` auto-detection subtracts 3 days from last run's `end_date`
+
+---
+
 ## 2026-02-26 - Scraped Title Replaces Truncated SERP Title
 
 ### Problem
