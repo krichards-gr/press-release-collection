@@ -1,6 +1,7 @@
 """
 Configuration Management for Press Release Collection Pipeline
 ================================================================
+# collection-only branch
 
 Centralizes ALL configuration settings for the pipeline in one place.
 Every setting is loaded from an environment variable with a sensible default,

@@ -208,23 +208,26 @@ outputs/
 
 - **`main.py`**: Cloud Run HTTP endpoint (production)
 - **`main_cli.py`**: CLI orchestrator (local/testing)
-- **`config.py`**: Centralized configuration
-- **`bigquery_storage.py`**: BigQuery table operations
-- **`grab_reference_data.py`**: Reference data fetching with caching
-- **`generate_queries.py`**: Search query generation
-- **`collect_results.py`**: SERP collection with retry logic and query timeouts
-- **`article_scraper.py`**: Multi-scraper content extraction with title enrichment
+- **`config.py`**: Centralized configuration singleton (`from config import config`)
+- **`bigquery_storage.py`**: BigQuery table operations and idempotency logic
+- **`grab_reference_data.py`**: Fetches Fortune 100 company list live from BigQuery
+- **`generate_queries.py`**: Builds date-scoped Google search queries per newsroom
+- **`collect_results.py`**: SERP collection via Bright Data proxy, concurrent with per-query timeout
+- **`article_scraper.py`**: 5-tier scraper fallback chain with URL filtering and title enrichment
+- **`date_extractor.py`**: 3-layer publish date resolution (URL pattern → article text → fallback)
+- **`backfill_company_sector.py`**: Utility to retroactively populate company/sector on existing rows
 
 ## 📈 Performance
 
 ### SERP Collection
-- **Pages per query**: Up to 2 (configurable)
+- **Pages per query**: Up to 5 (configurable via `MAX_SERP_PAGES`)
 - **Retry attempts**: 3 with exponential backoff
 - **Query timeout**: 20 seconds (skips hung queries)
+- **Concurrent workers**: 5 (configurable via `SERP_MAX_WORKERS`)
 
 ### Article Scraping
 - **Success rate**: 90-95%
-- **Workers**: 10 concurrent (configurable)
+- **Workers**: 10 concurrent (configurable via `SCRAPER_MAX_WORKERS`)
 - **Timeout**: 30 seconds per article
 
 ## 🐛 Troubleshooting
@@ -252,7 +255,7 @@ curl -X POST $SERVICE_URL
 
 ### Daily Automated Collection (CLI)
 ```bash
-# Uses BigQuery run history first, then checkpoint fallback
+# Uses BigQuery run history to auto-detect start_date
 python main_cli.py --incremental
 ```
 
